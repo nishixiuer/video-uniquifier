@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-electron/
+dist-preload/
+release/
+python/dist/
+python/build/
+*.spec
+__pycache__/
+.pytest_cache/
+.coverage
+coverage/
+test-results/
+playwright-report/
