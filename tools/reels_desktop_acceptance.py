@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import time
 from pathlib import Path
 
@@ -60,9 +61,11 @@ def main() -> None:
     window = MainWindow()
     window.state.set_theme("dark")
     window.resize(1180, 800)
-    window._navigate_to("Reels")
+    window._navigate_to("Run")
     window.show()
-    page = window.stack.currentWidget()
+    workspace = window.stack.currentWidget()
+    assert workspace.method.combo.currentData() == "reels"
+    page = workspace.delivery
     try:
         page.input_picker.set_path(args.source.resolve())
         wait_for(app, lambda: page.probe_worker is None)
@@ -75,7 +78,7 @@ def main() -> None:
         for mode in ("preflight", "sample", "export"):
             page._start(mode)
             wait_for(app, lambda: page.worker is None)
-            assert window.stack.currentWidget() is page, "Background work changed the route"
+            assert window.stack.currentWidget() is workspace, "Background work changed the route"
             assert not page.feedback.property("error"), page.details_text.toPlainText()
             if mode == "sample":
                 page.safe_btn.click()
@@ -113,12 +116,54 @@ def main() -> None:
         capture(app, window, args.screenshots / "delivery-light-zh.png")
         window.state.set_theme("dark")
         window.resize(1180, 800)
+        window._navigate_to("Batch")
+        batch = window.stack.currentWidget()
+        assert batch.method.combo.currentData() == "reels"
+        batch_inputs = args.out / "batch-inputs"
+        batch_inputs.mkdir(exist_ok=True)
+        for name in ("episode-01.mp4", "episode-02.mp4"):
+            shutil.copyfile(args.source, batch_inputs / name)
+        batch.input_dir = batch_inputs.resolve()
+        batch.output_dir = (args.out / "batch-exports").resolve()
+        batch.input_label.setText(str(batch.input_dir))
+        batch.output_label.setText(str(batch.output_dir))
+        batch.reels_options.resolution.setCurrentIndex(1)
+        batch.reels_options.trim_start.setValue(1)
+        batch.reels_options.trim_end.setValue(1)
+        batch._refresh_preview()
+        batch._refresh_run_btn()
+        batch.tabs.setCurrentIndex(1)
+        capture(app, window, args.screenshots / "batch-delivery-settings-zh.png")
+        history_before = len(window.state.history)
+        batch._on_run()
+        wait_for(app, lambda: batch.worker is None)
+        assert len(window.state.history) == history_before + 2, batch.status_label.text()
+        capture(app, window, args.screenshots / "batch-delivery-results-zh.png")
+        window._navigate_to("History")
+        history = window.stack.currentWidget()
+        history.table.selectRow(0)
+        capture(app, window, args.screenshots / "history-review-zh.png")
+        entry = history._selected_entry()
+        assert entry is not None
+        history.compare_btn.click()
+        comparison = history._compare_dialog
+        assert comparison is not None
+        wait_for(app, lambda: all(frame.isValid() for frame in comparison._frames))
+        assert comparison._source_range == (1000, 9000)
+        capture(app, comparison, args.screenshots / "history-comparison-zh.png")
+        comparison.close()
+        history.report_btn.click()
+        assert history._report_dialog is not None
+        capture(app, history._report_dialog, args.screenshots / "history-quality-zh.png")
+        history._report_dialog.close()
         window._navigate_to("Run")
         capture(app, window, args.screenshots / "processing-source-zh.png")
-        window.stack.currentWidget().workflow_navigation.setCurrentIndex(1)
+        workspace.method.combo.setCurrentIndex(1)
+        workspace.native.workflow_navigation.setCurrentIndex(1)
         capture(app, window, args.screenshots / "processing-settings-zh.png")
         evidence = {"output": str(page.result_directory), "platform": QApplication.platformName(),
                     "quality": report["quality_check"], "scenes": page.scene_table.rowCount(),
+                    "batch_exports": 2, "history_review": True,
                     "screenshots": str(args.screenshots.resolve())}
         (args.out / "acceptance.json").write_text(json.dumps(evidence, indent=2))
         print(json.dumps(evidence, ensure_ascii=False, indent=2))

@@ -38,6 +38,7 @@ from video_uniquifier.gui.screens.batch import BatchScreen
 from video_uniquifier.gui.screens.calibrate import CalibrateScreen
 from video_uniquifier.gui.screens.corpus import CorpusScreen
 from video_uniquifier.gui.screens.history import HistoryScreen
+from video_uniquifier.gui.screens.processing import ProcessingScreen
 from video_uniquifier.gui.screens.profile_editor import ProfileEditorScreen
 from video_uniquifier.gui.screens.qa_viewer import QaViewerScreen
 from video_uniquifier.gui.screens.queue import QueueScreen
@@ -155,7 +156,7 @@ SIDEBAR_ITEMS: list[tuple[str, str]] = [
 def _build_screen(label: str, lands_in: str, state: AppState) -> QWidget:
     """Instantiate the real screen if available, else PlaceholderScreen."""
     if label == "Run":
-        return RunScreen(state)
+        return ProcessingScreen(state)
     if label == "Reels":
         return ReelsScreen(state)
     if label == "Batch":
@@ -304,6 +305,12 @@ class MainWindow(QMainWindow):
         tasks: list[tuple[int, str, str, float | None]] = []
         for index, (label, _version) in enumerate(SIDEBAR_ITEMS):
             screen = self.stack.widget(index)
+            if isinstance(screen, ProcessingScreen):
+                delivery = screen.delivery
+                if delivery.worker is not None:
+                    tasks.append((index, self.tr(NAV_LABELS[label]), delivery.feedback.text(),
+                                  delivery.progress_bar.value() / 1000))
+                screen = screen.native
             if isinstance(screen, RunScreen):
                 if not any(worker is not None for worker in (
                     screen.run_worker, screen._sample_worker,
@@ -460,21 +467,10 @@ def _maybe_prompt_telemetry_consent(parent: QMainWindow | None = None) -> None:
 
 
 def _resolve_boot_locale() -> str:
-    """Persisted locale wins; env-derived hint is the first-launch fallback.
-
-    Reads state.json ahead of widget construction so the translator
-    is in place before any ``tr()`` call. A missing or unreadable
-    state.json falls back to the system hint and ultimately to
-    en_US — the i18n layer accepts an unknown locale by emitting
-    source strings, so this never blocks startup.
-    """
+    """Honor a saved language; use Simplified Chinese for fresh or invalid preferences."""
     import json
 
-    from video_uniquifier.gui.i18n import (
-        SOURCE_LOCALE,
-        available_locales,
-        system_locale_hint,
-    )
+    from video_uniquifier.gui.i18n import available_locales
     from video_uniquifier.gui.state import STATE_PATH
     locale: str | None = None
     try:
@@ -483,12 +479,10 @@ def _resolve_boot_locale() -> str:
             persisted = data.get("locale")
             if isinstance(persisted, str) and persisted:
                 locale = persisted
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError, AttributeError):
         locale = None
-    if locale is None:
-        locale = system_locale_hint()
     if locale is None or locale not in available_locales():
-        locale = SOURCE_LOCALE
+        locale = "zh_CN"
     return locale
 
 

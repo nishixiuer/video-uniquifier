@@ -132,7 +132,9 @@ def test_settings_switches_live_and_preserves_unsaved_inputs(qapp, qtbot):
     from video_uniquifier.gui.screens.settings import SettingsScreen
     from video_uniquifier.gui.state import AppState
 
-    screen = SettingsScreen(AppState())
+    state = AppState()
+    state.set_locale("en_US")
+    screen = SettingsScreen(state)
     qtbot.addWidget(screen)
     screen.show()
     screen.webhook_url_edit.setText("https://example.com/my-hook")
@@ -188,6 +190,9 @@ def test_every_page_uses_chinese_after_boot_or_language_switch(
         assert window.stack.widget(index) is page
         title = TRANSLATIONS["zh_CN"][NAV_LABELS[source]]
         assert window.sidebar_items[source].text() == title
+        if source == "Run":
+            page.method.combo.setCurrentIndex(1)
+            page = page.native
         assert page.page_title.text() == title
         assert page.help_button.text() == "使用说明"
         page.toggle_guide()

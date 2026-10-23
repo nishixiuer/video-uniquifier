@@ -1,6 +1,24 @@
 """Chinese captions for the focused desktop delivery workflow."""
 
 STRINGS = {
+    "Starting…": "正在开始…",
+    "Done.": "处理完成。",
+    "Quality report": "质量报告",
+    "Processing method": "处理方式",
+    "Vertical delivery · Facebook Reels": "竖屏视频交付 · Facebook Reels",
+    "Original processing · transform profiles": "原有视频处理 · 变换配置",
+    "Reels prepares vertical video and dialogue loudness. "
+    "Original processing uses soft, moderate or aggressive transforms.":
+        "竖屏交付统一画面格式和对白响度；原有处理可选择轻柔、适中或强烈变换。",
+    "Files & progress": "文件与进度",
+    "Review completed jobs": "查看历史与结果",
+    "Configuration error": "配置错误",
+    "Completed: {done} · Failed: {failed}": "已完成：{done} · 失败：{failed}",
+    "Video saved, but history could not be written.": "视频已保存，但历史记录写入失败。",
+    "Video comparison": "视频对比",
+    "This job has no readable quality report. Check whether it was generated "
+    "or moved from its export folder.":
+        "此任务没有可读取的质量报告，请确认处理时已生成报告，且报告未被移动或删除。",
     "Reels vertical preset · set up, preview and export in four steps.":
         "Reels 竖屏预设 · 按四步完成参数设置、样片检查与成片导出。",
     "Vertical format and delivery checks": "竖屏格式 · 成片检查",

@@ -164,7 +164,9 @@ def test_encoder_override_reaches_combo_data_and_restores_saved_choice(qtbot) ->
 def test_edit_profile_navigates_to_the_selected_recipe(gui_window_factory) -> None:
     window = gui_window_factory()
     window.show()
-    run = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    run = window.stack.widget(0).native
+    QApplication.processEvents()
     run.profile_combo.setCurrentIndex(run.profile_combo.findText("medium"))
     run._open_profile_editor()
     assert window.stack.currentIndex() == 4
@@ -234,13 +236,15 @@ def test_every_screen_fits_a_small_window_and_primary_action_stays_visible(
         qapp.processEvents()
     assert (window.width(), window.height()) == (980, 640)
     page = window.stack.currentWidget()
+    if index == 0:
+        page = page.workflows.currentWidget()
     assert page.page_scroll.widget().width() <= page.page_scroll.viewport().width()
     assert window.sidebar.horizontalScrollBar().maximum() == 0
     if index == 0:
         page.page_scroll.verticalScrollBar().setValue(10_000)
         qapp.processEvents()
-        button_rect = page.run_btn.rect()
-        origin = page.run_btn.mapTo(window, button_rect.topLeft())
+        button_rect = page.next_btn.rect()
+        origin = page.next_btn.mapTo(window, button_rect.topLeft())
         assert window.rect().contains(origin)
         assert window.rect().contains(origin + button_rect.bottomRight())
 
@@ -309,7 +313,9 @@ def test_completed_result_and_expanded_metrics_fit_the_small_window(
     window = gui_window_factory()
     window.resize(980, 640)
     window.show()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     report = tmp_path / "report.html"
     report.touch()
     report.with_suffix(".json").write_text(json.dumps({

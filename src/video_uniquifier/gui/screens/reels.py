@@ -44,11 +44,9 @@ from video_uniquifier.gui.widgets.surfaces import Disclosure, SectionCard
 from video_uniquifier.gui.widgets.video_compare import VideoCompareDialog
 from video_uniquifier.gui.widgets.workflow_navigation import WorkflowNavigation
 from video_uniquifier.gui.workers.probe_worker import ProbeWorker
+from video_uniquifier.gui.workers.reels_worker import PHASE_LABELS as PHASES
 from video_uniquifier.gui.workers.reels_worker import ReelsMode, ReelsWorker
 
-PHASES = {"queued": "Waiting for a processing slot", "probing": "Checking source video",
-          "processing": "Encoding video", "qa": "Checking picture and sound",
-          "success": "Delivery complete"}
 ERROR_HINTS = {
     "hdr_requires_tonemap": "Choose HDR to SDR in delivery settings, then check a sample.",
     "scene_dependency": "Install the scene extra or turn off shot detection in Audio & timeline.",

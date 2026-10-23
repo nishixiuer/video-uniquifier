@@ -1,5 +1,33 @@
 # Facebook Reels implementation log
 
+## Default processing methods and historical review (2026-10-23)
+
+- Single-video processing defaults to the existing four-step Reels workflow, with
+  an explicit selector for the original native-transform workspace. Native routes,
+  shortcuts, background activity and cooperative shutdown remain available.
+- Batch processing shares the same validated rules, asset staging and delivery core.
+  File/progress and settings pages are separate; per-file completion, failure policy,
+  cancellation and published history use the selected-source snapshot. UUID result
+  folders prevent same-named inputs from overwriting each other.
+- History reopens the saved original/output pair in native synchronized playback,
+  including delivery trim alignment, and displays the saved delivery report as tables.
+  Fixed footer actions stay reachable in narrow windows. Legacy HTML reports open in
+  an app window; history and batch video actions use the native player. Closing/replacing
+  a comparison preserves it until its frame worker has stopped.
+- Fresh preferences default to Simplified Chinese; valid saved language choices win.
+  Processing-method captions, grouped settings and delivery phase names translate live.
+- Regression: **2189 passed, 2 skipped** in unit/contract/desktop smoke checks. An
+  additional focused run covers all final playback changes (**107 passed**), with
+  **90.0% branch-aware coverage** across batch/history/method UI and delivery workers.
+  Cocoa integration verifies same-named batch exports, in-app report reload and native
+  playback; real source preview and review integrations also pass.
+- Native desktop acceptance processes one full export, a separate sample, and two
+  batch exports. Reloaded history reports and trimmed comparison pass. Evidence:
+  `out/processing-methods-acceptance/acceptance.json`; reviewed screenshots:
+  `docs/screenshots/{processing-methods-default,batch-delivery-settings,history-review,history-quality}-zh.png`.
+  Ruff, GUI mypy (76 modules) and wheel build pass. Full-project mypy retains the
+  pre-existing optional-Torch `unused-ignore` finding at `core/qa/sscd.py:129`.
+
 ## Tabular desktop quality reports (2026-10-23)
 
 - Delivery's quality-report action opens a native window with source/output columns

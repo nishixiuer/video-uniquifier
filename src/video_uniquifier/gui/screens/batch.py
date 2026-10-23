@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import (
@@ -15,20 +17,30 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from video_uniquifier.core.errors import VideoUniquifierError
 from video_uniquifier.core.profile_loader import load_profile
+from video_uniquifier.core.reels.runtime import ReelsError
 from video_uniquifier.gui.a11y import mark
 from video_uniquifier.gui.paths import profiles_dir
 from video_uniquifier.gui.screens.base import ScreenBase
-from video_uniquifier.gui.state import AppState
+from video_uniquifier.gui.state import AppState, HistoryEntry
 from video_uniquifier.gui.widgets.encoder_selector import EncoderSelector
 from video_uniquifier.gui.widgets.file_picker import PathLabel
+from video_uniquifier.gui.widgets.processing_method import ProcessingMethod
+from video_uniquifier.gui.widgets.reels_options import ReelsOptions
+from video_uniquifier.gui.widgets.studio_preview import StudioPreview
 from video_uniquifier.gui.widgets.studio_table import StudioTable, TableTools
 from video_uniquifier.gui.widgets.surfaces import FieldGrid
+from video_uniquifier.gui.widgets.video_compare import VideoCompareDialog
 from video_uniquifier.gui.workers.batch_worker import BatchWorker
+from video_uniquifier.gui.workers.reels_worker import PHASE_LABELS, ReelsBatchWorker
 
 PROFILES_DIR = profiles_dir()
 
@@ -38,7 +50,8 @@ class BatchScreen(ScreenBase):
         super().__init__(state)
         self.input_dir: Path | None = None
         self.output_dir: Path | None = None
-        self.worker: BatchWorker | None = None
+        self.worker: BatchWorker | ReelsBatchWorker | None = None
+        self._player: VideoCompareDialog | None = None
         self._completed_files: set[str] = set()
         self._build_ui()
 
@@ -47,6 +60,21 @@ class BatchScreen(ScreenBase):
             'Batch processing',
             'Process a folder of videos with one profile and track each result.',
         )
+        self.method = ProcessingMethod()
+        layout.addWidget(self.method)
+        self.tabs = QTabWidget()
+        files_page = QWidget()
+        files_layout = QVBoxLayout(files_page)
+        self.tabs.addTab(files_page, self.tr("Files & progress"))
+        self.settings = QStackedWidget()
+        self.reels_options = ReelsOptions()
+        self.settings.addWidget(self.reels_options)
+        native_page = QWidget()
+        native_layout = QVBoxLayout(native_page)
+        self.settings.addWidget(native_page)
+        self.tabs.addTab(self.settings, self.tr("Processing settings"))
+        self.method.combo.currentIndexChanged.connect(self.settings.setCurrentIndex)
+        layout.addWidget(self.tabs, stretch=1)
 
         # Input dir
         row1 = QHBoxLayout()
@@ -60,7 +88,7 @@ class BatchScreen(ScreenBase):
              "Pick the directory containing source videos to batch-process.")
         self.input_browse_btn = b1
         row1.addWidget(b1)
-        layout.addLayout(row1)
+        files_layout.addLayout(row1)
 
         # Output dir
         row2 = QHBoxLayout()
@@ -74,7 +102,7 @@ class BatchScreen(ScreenBase):
              "Pick the destination directory for the uniquified outputs.")
         self.output_browse_btn = b2
         row2.addWidget(b2)
-        layout.addLayout(row2)
+        files_layout.addLayout(row2)
 
         # Pattern + profile + encoder + continue-on-error
         row3 = FieldGrid()
@@ -83,6 +111,7 @@ class BatchScreen(ScreenBase):
         mark(self.pattern_edit, "Glob pattern",
              "File glob applied inside the input directory.")
         row3.add_field("File pattern", self.pattern_edit)
+        native_fields = FieldGrid()
         self.profile_combo = QComboBox()
         for p in sorted(PROFILES_DIR.glob("*.yaml")):
             self.profile_combo.addItem(p.stem, str(p))
@@ -92,15 +121,17 @@ class BatchScreen(ScreenBase):
             self.profile_combo.setCurrentIndex(index)
         mark(self.profile_combo, "Profile",
              "Transform profile applied to every file in the batch.")
-        row3.add_field("Profile", self.profile_combo)
+        native_fields.add_field("Profile", self.profile_combo)
         self.encoder_selector = EncoderSelector(self.state)
-        row3.add_field("Encoder", self.encoder_selector)
+        native_fields.add_field("Encoder", self.encoder_selector)
+        native_layout.addWidget(native_fields)
+        native_layout.addStretch(1)
         self.continue_check = QCheckBox(self.tr("&Continue on error"))
         self.continue_check.setChecked(True)
         mark(self.continue_check, "Continue on error",
              "If checked, a failed file logs to Notes and the batch keeps going.")
         row3.add_field("When a file fails", self.continue_check)
-        layout.addWidget(row3)
+        files_layout.addWidget(row3)
 
         # Table
         self.table = StudioTable(5, self.state, "batch.header", 1)
@@ -109,9 +140,11 @@ class BatchScreen(ScreenBase):
              "Actions"],
         )
         self.table.restore_header()
+        self.table.open_requested.disconnect()
+        self.table.open_requested.connect(self._play_video)
         self.table_tools = TableTools(self.table)
-        layout.addWidget(self.table_tools)
-        layout.addWidget(self.table, stretch=1)
+        files_layout.addWidget(self.table_tools)
+        files_layout.addWidget(self.table, stretch=1)
 
         # Overall progress bar (X of N files complete; updated on file_done)
         self.progress_bar = QProgressBar()
@@ -120,7 +153,7 @@ class BatchScreen(ScreenBase):
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(self.tr("Files: %v / %m (%p%)"))
         self.progress_bar.hide()
-        layout.addWidget(self.progress_bar)
+        files_layout.addWidget(self.progress_bar)
 
         # Controls
         controls = QHBoxLayout()
@@ -149,6 +182,10 @@ class BatchScreen(ScreenBase):
         self.status_label.setObjectName("status")
         controls.addWidget(self.status_label)
         controls.addStretch(1)
+        self.history_btn = QPushButton(self.tr("Review completed jobs"))
+        self.history_btn.setAccessibleName(self.tr("Review completed jobs"))
+        self.history_btn.clicked.connect(lambda: self.navigate_requested.emit("History"))
+        controls.addWidget(self.history_btn)
         self.add_action_bar(controls)
 
     def changeEvent(self, event: QEvent | None) -> None:
@@ -160,6 +197,30 @@ class BatchScreen(ScreenBase):
         super().changeEvent(event)
 
     # ---- handlers ----
+    def _play_video(self, path: str) -> None:
+        output = Path(path)
+        if not output.is_file():
+            QMessageBox.warning(self, self.tr("File unavailable"), path)
+            return
+        window = self.window() or self
+        for preview in window.findChildren(StudioPreview):
+            preview.pause()
+        for dialog in window.findChildren(VideoCompareDialog):
+            dialog.pause()
+        if self._player is not None:
+            if not self._player.close():
+                return
+            self._player.deleteLater()
+        self._player = VideoCompareDialog(None, output, parent=self)
+        self._player.wipe.set_theme(self.state.theme)
+        self.state.theme_changed.connect(self._player.wipe.set_theme)
+        self._player.show()
+
+    def shutdown_workers(self, wait_ms: int = 16000) -> bool:
+        if self._player is not None and not self._player.close():
+            return False
+        return super().shutdown_workers(wait_ms)
+
     def _pick_input(self) -> None:
         if self.worker is not None:
             return
@@ -229,21 +290,29 @@ class BatchScreen(ScreenBase):
         if self.worker is not None or not files:
             return
         try:
-            profile = load_profile(Path(self.profile_combo.currentData()))
-        except VideoUniquifierError as exc:
-            QMessageBox.critical(self, "Profile error", str(exc))
+            if self.method.combo.currentData() == "reels":
+                rules, assets = self.reels_options.configuration()
+                self.worker = ReelsBatchWorker(
+                    files, rules, self.output_dir, assets=assets,
+                    continue_on_error=self.continue_check.isChecked(),
+                )
+                self.worker.item_completed.connect(self._record_delivery)
+                self.worker.cancelled.connect(self._on_cancelled)
+                self.worker.file_cancelled.connect(lambda path: self._set_status(path, "cancelled"))
+            else:
+                profile = load_profile(Path(self.profile_combo.currentData()))
+                self.worker = BatchWorker(
+                    self.input_dir, self.output_dir, profile,
+                    self.encoder_selector.currentData(),
+                    glob_pattern=self.pattern_edit.text() or "*.mp4",
+                    continue_on_error=self.continue_check.isChecked(), files=files,
+                )
+        except (VideoUniquifierError, ReelsError, ValueError, OSError) as exc:
+            QMessageBox.critical(self, self.tr("Configuration error"), str(exc))
+            self.tabs.setCurrentIndex(1)
             return
 
         self._completed_files.clear()
-        self.worker = BatchWorker(
-            self.input_dir,
-            self.output_dir,
-            profile,
-            self.encoder_selector.currentData(),
-            glob_pattern=self.pattern_edit.text() or "*.mp4",
-            continue_on_error=self.continue_check.isChecked(),
-            files=files,
-        )
         self.worker.file_started.connect(
             lambda p: self._set_status(p, "running"),
         )
@@ -253,9 +322,7 @@ class BatchScreen(ScreenBase):
         self.worker.file_failed.connect(
             lambda p, msg: self._set_status(p, "failed", note=msg),
         )
-        self.worker.progress.connect(
-            lambda _f, m: self.status_label.setText(m),
-        )
+        self.worker.progress.connect(self._on_progress)
         self.worker.finished_ok.connect(self._on_done)
         self.worker.failed.connect(self._on_failed)
 
@@ -263,7 +330,8 @@ class BatchScreen(ScreenBase):
         self.run_selected_btn.setEnabled(False)
         self._set_inputs_enabled(False)
         self.cancel_btn.setEnabled(True)
-        self.status_label.setText("starting…")
+        self.status_label.setText(self.tr("Starting…"))
+        self.tabs.setCurrentIndex(0)
         # Reset overall progress: max = number of files matched in the table.
         self.progress_bar.show()
         self.progress_bar.setRange(0, len(files))
@@ -272,27 +340,59 @@ class BatchScreen(ScreenBase):
 
     def _set_inputs_enabled(self, enabled: bool) -> None:
         for control in (self.pattern_edit, self.input_browse_btn, self.output_browse_btn,
-                        self.profile_combo, self.encoder_selector, self.continue_check):
+                        self.profile_combo, self.encoder_selector, self.continue_check,
+                        self.method, self.settings):
             control.setEnabled(enabled)
+
+    def _on_progress(self, _fraction: float, message: str) -> None:
+        self.status_label.setText(self.tr(PHASE_LABELS.get(message, message)))
 
     def _on_cancel(self) -> None:
         if self.worker is not None:
             self.worker.request_cancel()
-            self.status_label.setText("cancelling…")
+            self.status_label.setText(self.tr("Cancelling…"))
 
     def _on_done(self, _payload: object) -> None:
-        self.status_label.setText("Done.")
+        if isinstance(_payload, dict) and "completed" in _payload:
+            self.status_label.setText(self.tr("Completed: {done} · Failed: {failed}").format(
+                done=_payload["completed"], failed=_payload["failed"],
+            ))
+        else:
+            self.status_label.setText(self.tr("Done."))
         self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._set_inputs_enabled(True)
         self._refresh_run_btn()
 
     def _on_failed(self, msg: str) -> None:
-        self.status_label.setText(f"FAILED: {msg}")
+        self.status_label.setText(self.tr("Failed") + f": {msg}")
         self._drop_worker()
         self.cancel_btn.setEnabled(False)
         self._set_inputs_enabled(True)
         self._refresh_run_btn()
+
+    def _on_cancelled(self) -> None:
+        self._on_failed(self.tr("Cancelled"))
+        self.status_label.setText(self.tr("Cancelled"))
+
+    def _record_delivery(self, source: str, payload: dict[str, Any]) -> None:
+        report = payload["report"]
+        worker = self.worker
+        if not isinstance(worker, ReelsBatchWorker):
+            return
+        try:
+            self.state.push_history(HistoryEntry(
+                timestamp=datetime.now().isoformat(timespec="seconds"), source_path=source,
+                profile_name=worker.rules.preset_id, encoder_name="libx264",
+                output_path=str(Path(payload["directory"]) / "output.mp4"), qa_html_path=None,
+                plan_hash=report["plan_hash"], status="done",
+            ))
+        except OSError:
+            row = self.table.find_key(source)
+            if row is not None:
+                self.table.setItem(row, 3, QTableWidgetItem(self.tr(
+                    "Video saved, but history could not be written.",
+                )))
 
     def _drop_worker(self) -> None:
         """Join the BatchWorker QThread before dropping the Python ref.

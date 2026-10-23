@@ -447,7 +447,9 @@ def test_progress_polling_preserves_task_dropdown_navigation(qtbot):
 
 def test_global_banner_survives_navigation_and_hides_after_completion(gui_window_factory):
     window = gui_window_factory()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     screen._sample_worker = MagicMock()
     screen.status_label.setText("Video 42%")
     screen.progress_bar.setRange(0, 1000)

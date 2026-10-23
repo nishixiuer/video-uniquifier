@@ -37,6 +37,8 @@ def test_every_page_has_readable_optional_help_at_minimum_window_size(
         window._navigate_to(label)
         qapp.processEvents()
         screen = window.stack.currentWidget()
+        if label == "Run":
+            screen = screen.workflows.currentWidget()
         assert isinstance(screen, ScreenBase)
         button, guide = screen.help_button, screen.guide_panel
         assert button is not None and guide is not None
@@ -66,7 +68,7 @@ def test_f1_opens_current_page_help_from_navigation_and_leaves_other_pages_alone
     window.activateWindow()
     window.sidebar.setFocus()
     qapp.processEvents()
-    first = window.stack.currentWidget()
+    first = window.stack.currentWidget().delivery
     qtbot.keyClick(window.sidebar, Qt.Key.Key_F1)
     assert first.guide_panel.isVisible()
     window._navigate_to("Settings")
@@ -87,7 +89,8 @@ def test_live_language_change_translates_open_help_without_changing_inputs(
 ):
     window = gui_window_factory()
     window.show()
-    screen = window.stack.currentWidget()
+    window.stack.currentWidget().method.combo.setCurrentIndex(1)
+    screen = window.stack.currentWidget().native
     screen.output_picker.set_path(tmp_path / "result.mp4")
     profile = screen.profile_combo.currentData()
     enabled = screen.run_btn.isEnabled()
@@ -125,7 +128,8 @@ def test_help_with_large_text_scrolls_without_covering_primary_actions(
     window = gui_window_factory()
     window.resize(980, 640)
     window.show()
-    screen = window.stack.currentWidget()
+    window.stack.currentWidget().method.combo.setCurrentIndex(1)
+    screen = window.stack.currentWidget().native
     screen.toggle_guide()
     for label in screen.guide_panel.findChildren(QLabel):
         label.setStyleSheet("font-size: 20px;")

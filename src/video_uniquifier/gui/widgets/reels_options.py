@@ -164,6 +164,7 @@ class ReelsOptions(QTabWidget):
         for decimal in self.findChildren(QDoubleSpinBox):
             decimal.valueChanged.connect(self.changed)
         for checkbox in self.findChildren(QCheckBox):
+            checkbox.setAccessibleName(checkbox.text())
             checkbox.toggled.connect(self.changed)
         self.title_group.toggled.connect(self.changed)
         self.logo_group.toggled.connect(self.changed)

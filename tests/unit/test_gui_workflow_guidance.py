@@ -75,7 +75,9 @@ def test_empty_workspace_import_action_fits_and_reuses_the_picker(
     window.resize(*size)
     window.show()
     QApplication.processEvents()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     preview = screen.preview
     assert preview.mode_bar.isHidden()
     assert preview.transport_bar.isHidden()
@@ -98,7 +100,9 @@ def test_empty_workspace_import_action_fits_and_reuses_the_picker(
 
 def test_busy_processing_disables_import_and_advances_the_overview(gui_window_factory):
     window = gui_window_factory()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     screen.run_worker = object()
     try:
         screen._refresh_run_button()

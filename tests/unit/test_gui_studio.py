@@ -154,7 +154,9 @@ def test_workspace_keeps_preview_inspector_and_primary_action_visible(
     window.resize(*size)
     window.show()
     QApplication.processEvents()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     assert screen.preview.width() >= 300
     assert screen.settings_scroll.width() >= 316
     assert screen.preview.mapTo(window, screen.preview.rect().topRight()).x() < (
@@ -182,7 +184,9 @@ def test_compact_cards_show_only_selected_details(qtbot):
 @pytest.mark.parametrize("size", [(980, 640), (1440, 900)])
 def test_log_is_full_width_below_result_and_collapses_to_one_row(gui_window_factory, size):
     window = gui_window_factory()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     # The previous side-by-side lower panes must not override the new layout.
     old = StudioSplitter(Qt.Orientation.Horizontal, window.state, "run.bottom")
     old.addWidget(QWidget())
@@ -226,7 +230,9 @@ def test_file_selection_precedes_preview_and_sample_action_needs_no_disclosure(
     window.resize(*size)
     window.show()
     QApplication.processEvents()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     source_top = screen.input_picker.mapTo(window, screen.input_picker.rect().topLeft())
     output_top = screen.output_picker.mapTo(window, screen.output_picker.rect().topLeft())
     assert source_top.y() == output_top.y()
@@ -265,7 +271,9 @@ def test_workspace_controls_and_disclosures_keep_their_panel_insets(
     window.resize(*size)
     window.show()
     QApplication.processEvents()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     preview = screen.preview
     # Check transport insets in its loaded layout; empty state has no transport.
     preview.mode_bar.show()
@@ -374,7 +382,9 @@ def test_compact_profile_selection_and_custom_controls_remain_reachable(
 ):
     window = gui_window_factory()
     window.show()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     screen.workflow_navigation.setCurrentIndex(1)
     qtbot.mouseClick(screen.profile_cards.buttons["medium"], Qt.MouseButton.LeftButton)
     assert Path(screen.profile_combo.currentData()).stem == "medium"
@@ -395,7 +405,9 @@ def test_completed_result_reveals_its_status_and_actions(gui_window_factory, qtb
     window = gui_window_factory()
     window.resize(1440, 900)
     window.show()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     screen.processing_status.start()
     screen._on_stage_progress("quality", None)
     output = tmp_path / "completed.mp4"

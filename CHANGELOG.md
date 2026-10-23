@@ -28,6 +28,12 @@ the last tag.
 
 ### Changed
 
+- Single and batch desktop processing offer Reels delivery as the default method,
+  with separate native-transform settings. History reopens synchronized comparison,
+  in-app playback and readable quality reports for completed deliveries, including
+  batch jobs. Fresh installations default to Simplified Chinese while retaining
+  explicitly saved language preferences.
+
 - The ordinary processing workspace separates source/preview, settings, and
   progress/result into navigable pages. Primary actions stay outside scrolling areas.
 

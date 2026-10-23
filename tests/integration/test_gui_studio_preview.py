@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtMultimedia import QMediaPlayer
+from PyQt6.QtWidgets import QApplication
 
 from video_uniquifier.gui.widgets.studio_preview import StudioPreview
 
@@ -81,7 +82,9 @@ def test_loaded_hd_preview_keeps_transport_inside_a_small_workspace(
     ], check=True, capture_output=True, timeout=30)
     window = gui_window_factory()
     window.show()
-    screen = window.stack.widget(0)
+    window.stack.widget(0).method.combo.setCurrentIndex(1)
+    screen = window.stack.widget(0).native
+    QApplication.processEvents()
     screen.input_picker.set_path(hd)
     qtbot.waitUntil(lambda: screen.preview._frame.isValid(), timeout=15000)
     window.resize(980, 640)
@@ -91,10 +94,15 @@ def test_loaded_hd_preview_keeps_transport_inside_a_small_workspace(
         screen.preview.seek_bar.mapTo(screen.workspace_top, bottom),
     )
     assert window.rect().contains(screen.preview.seek_bar.mapTo(window, bottom))
-    assert screen.sample_btn.isEnabled()
+    qtbot.waitUntil(screen.sample_btn.isEnabled, timeout=15000)
+    top, progress, log = screen.workspace_splitter.sizes()
+    assert top > 0 and progress == 0 and log == 0
+    screen.workflow_navigation.setCurrentIndex(1)
+    app = QApplication.instance()
+    assert app is not None
+    app.processEvents()
+    assert screen.sample_btn.isVisible()
     assert window.rect().contains(
         screen.sample_btn.mapTo(window, screen.sample_btn.rect().bottomRight()),
     )
-    top, progress, log = screen.workspace_splitter.sizes()
-    assert top > 0 and log > 0
-    assert progress == 0 and screen.progress_scroll.isHidden()
+    assert screen.progress_scroll.isHidden()

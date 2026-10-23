@@ -32,7 +32,7 @@ SCREEN_INDEX = {
 
 # (sidebar label, screen class attribute names that must be present and non-None)
 EXPECTED_WIDGETS: dict[str, list[str]] = {
-    "Run":            ["profile_combo", "run_btn", "cancel_btn", "status_label"],
+    "Run":            ["method", "workflows", "delivery", "native"],
     "Reels":          ["navigation", "options", "sample_btn", "cancel_btn", "progress_bar"],
     "Batch":          ["pattern_edit", "profile_combo", "table", "run_btn", "cancel_btn"],
     "Calibrate":      ["profile_combo", "target_spin", "quality_spin", "iter_spin",

@@ -150,7 +150,7 @@ class AppState(QObject):
         self._history: list[HistoryEntry] = []
         self._notifications: NotificationConfig | None = None
         self._telemetry: TelemetryConfig | None = None
-        self._locale: str = "en_US"
+        self._locale: str = "zh_CN"
         self._layout_states: dict[str, str] = {}
         self._reduced_motion = False
         self._load()
