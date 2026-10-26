@@ -9,6 +9,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { navigate } from "./navigation";
 
 let app: ElectronApplication;
 let page: Page;
@@ -39,8 +40,7 @@ async function launch() {
   ).toBeVisible();
 }
 async function go(name: string) {
-  await page.getByRole("link", { name, exact: true }).click();
-  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  await navigate(page, name);
 }
 async function capture(name: string) {
   await expect(page.locator(".ant-message-notice")).toHaveCount(0);
@@ -150,17 +150,31 @@ test("独立中文导航、手动草稿、图片预览和审核", async () => {
 test("可配置 AI 接口通过主进程生成并保存待审核内容", async () => {
   await go("帖子内容");
   await page.getByRole("tab", { name: "批量生成", exact: true }).click();
-  await page.getByRole("button", { name: "配置 AI", exact: true }).click();
-  const modal = page.getByRole("dialog");
-  await modal.getByLabel("Base URL", { exact: false }).fill(endpoint);
-  await modal.getByLabel("模型名称", { exact: true }).fill("local-test");
-  await modal.getByLabel("API Key", { exact: false }).fill(key);
-  await modal.getByRole("button", { name: "保存接口", exact: true }).click();
-  await expect(modal).not.toBeVisible();
   await page.getByLabel("产品 / 短剧名称", { exact: true }).fill("短剧测试");
   await page
     .getByLabel("产品资料 / 剧情介绍", { exact: true })
     .fill("仅本机模拟服务测试，禁止真实发帖。");
+  await page.getByRole("link", { name: "管理 AI 接口 →", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "服务配置", exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Base URL", { exact: false }).fill(endpoint);
+  await page.getByLabel("模型名称", { exact: true }).fill("local-test");
+  await page.getByLabel("API Key", { exact: false }).fill(key);
+  await page.getByRole("button", { name: "保存 AI 接口", exact: true }).click();
+  await expect(
+    page.getByLabel("API Key（已加密保存，留空保留）", { exact: true }),
+  ).toHaveValue("");
+  await page.getByRole("link", { name: "前往帖子内容 →", exact: true }).click();
+  await expect(
+    page.getByRole("tab", { name: "批量生成", exact: true }),
+  ).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByLabel("产品 / 短剧名称", { exact: true })).toHaveValue(
+    "短剧测试",
+  );
+  await expect(
+    page.getByLabel("产品资料 / 剧情介绍", { exact: true }),
+  ).toHaveValue("仅本机模拟服务测试，禁止真实发帖。");
   await page.getByLabel("生成数量", { exact: true }).fill("2");
   await page.getByLabel("生成方式", { exact: true }).press("ArrowDown");
   await page.getByLabel("生成方式", { exact: true }).press("ArrowDown");
@@ -186,13 +200,16 @@ test("可配置 AI 接口通过主进程生成并保存待审核内容", async (
 });
 
 test("Meta 应用本机加密配置和任务暂停状态可在重启后恢复", async () => {
-  await go("主页授权");
+  await go("服务配置");
   await page.getByLabel("Meta App ID", { exact: true }).fill("123456789");
   await page.getByLabel("App Secret", { exact: true }).fill("TEST_META_SECRET");
   await page.getByRole("button", { name: "保存应用配置", exact: true }).click();
   await expect(
     page.getByLabel("App Secret（已加密保存，留空保留）", { exact: true }),
   ).toHaveValue("");
+  await capture("publishing-settings");
+  await page.getByRole("link", { name: "前往主页授权 →", exact: true }).click();
+  await expect(page.getByLabel("Meta App ID", { exact: true })).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "打开 Facebook 官方授权", exact: true }),
   ).toBeEnabled();
@@ -213,6 +230,7 @@ test("Meta 应用本机加密配置和任务暂停状态可在重启后恢复", 
   ).toBeVisible();
   await capture("publishing-tasks");
   await go("帖子内容");
+  await page.getByRole("tab", { name: /内容库/ }).click();
   await expect(
     page.getByRole("row").filter({ hasText: "本地图片帖子" }),
   ).toBeVisible();

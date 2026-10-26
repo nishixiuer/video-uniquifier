@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Alert,
   App,
@@ -13,7 +14,6 @@ import {
   Popconfirm,
   Select,
   Space,
-  Spin,
   Switch,
   Table,
   Tabs,
@@ -26,53 +26,16 @@ import type {
   GenerationInput,
   Media,
   Post,
-  PublishingSnapshot,
 } from "../../shared/publishing";
 import { taskLabels } from "../../shared/publishing";
 import { PageTitle, Video } from "../components";
 import { useStore } from "../store";
-
-const invoke = <T,>(method: string, params: object = {}) =>
-  window.electronAPI.publishing<T>(method, params);
-function usePublishing() {
-  const [data, setData] = useState<PublishingSnapshot | null>(null);
-  const [error, setError] = useState("");
-  const refresh = useCallback(async () => {
-    try {
-      setData(await invoke<PublishingSnapshot>("snapshot"));
-      setError("");
-    } catch {
-      setError("无法读取本地发布数据，请重新启动应用。");
-    }
-  }, []);
-  useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [refresh]);
-  const { message } = App.useApp();
-  const run = async (
-    method: string,
-    params: object = {},
-    success = "已保存",
-  ) => {
-    try {
-      const result = await invoke(method, params);
-      await refresh();
-      if (success) message.success(success);
-      return result;
-    } catch (error) {
-      message.error(String(error));
-      throw error;
-    }
-  };
-  return { data, error, refresh, run };
-}
-function Loading({ error }: { error: string }) {
-  return error ? <Alert type="error" message={error} /> : <Spin />;
-}
+import { useDraft } from "../useDraft";
+import {
+  invoke,
+  usePublishing,
+  PublishingLoading as Loading,
+} from "./publishing-state";
 const languages = ["简体中文", "繁体中文", "英语", "日语", "韩语"].map(
   (label) => ({ value: label, label }),
 );
@@ -108,7 +71,14 @@ export function PostsPage() {
   const [form] = Form.useForm();
   const [generateForm] = Form.useForm();
   const [media, setMedia] = useState<Media[]>([]);
-  const [generationMedia, setGenerationMedia] = useState<Media[]>([]);
+  const [generationMedia, setGenerationMedia] = useDraft<Media[]>(
+    "publishing:media",
+    [],
+  );
+  const [generationDraft, setGenerationDraft] = useDraft<
+    Partial<GenerationInput>
+  >("publishing:generation", {});
+  const [activeTab, setActiveTab] = useDraft("publishing:tab", "posts");
   const [busy, setBusy] = useState(false);
   const [generationResult, setGenerationResult] = useState<
     { id?: string; error?: string }[]
@@ -117,8 +87,6 @@ export function PostsPage() {
   const [search, setSearch] = useState("");
   const [template, setTemplate] = useState(false);
   const [templateForm] = Form.useForm();
-  const [ai, setAi] = useState(false);
-  const [aiForm] = Form.useForm();
   const [publish, setPublish] = useState<Post | null>(null);
   const [publishForm] = Form.useForm();
   const [preview, setPreview] = useState<Post | null>(null);
@@ -256,6 +224,8 @@ export function PostsPage() {
         }
       />
       <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: "posts",
@@ -429,6 +399,7 @@ export function PostsPage() {
                   <Form
                     form={generateForm}
                     layout="vertical"
+                    onValuesChange={(_, values) => setGenerationDraft(values)}
                     initialValues={{
                       mode: "template",
                       language: "简体中文",
@@ -436,6 +407,7 @@ export function PostsPage() {
                       quantity: 1,
                       imagesPerPost: 0,
                       tags: [],
+                      ...generationDraft,
                     }}
                   >
                     <div className="form-grid">
@@ -522,14 +494,7 @@ export function PostsPage() {
                       >
                         选择本地素材
                       </Button>
-                      <Button
-                        onClick={() => {
-                          setAi(true);
-                          aiForm.setFieldsValue(data.ai);
-                        }}
-                      >
-                        配置 AI
-                      </Button>
+                      <Link to="/settings/services">管理 AI 接口 →</Link>
                       <Button
                         onClick={() => {
                           setTemplate(true);
@@ -718,50 +683,6 @@ export function PostsPage() {
         </Form>
       </Modal>
       <Modal
-        title="AI 文案接口"
-        open={ai}
-        onCancel={() => {
-          setAi(false);
-          aiForm.resetFields();
-        }}
-        okText="保存接口"
-        cancelText="取消"
-        onOk={async () => {
-          try {
-            await run("ai.save", await aiForm.validateFields());
-            setAi(false);
-            aiForm.resetFields();
-          } catch {}
-        }}
-      >
-        <Form form={aiForm} layout="vertical">
-          <Form.Item
-            name="baseUrl"
-            label="Base URL（包含 /v1，不包含 /chat/completions）"
-            rules={[{ required: true }]}
-          >
-            <Input placeholder="https://api.example.com/v1" />
-          </Form.Item>
-          <Form.Item name="model" label="模型名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item
-            name="key"
-            label={
-              data.ai.hasKey
-                ? "API Key（已加密保存，留空保留）"
-                : "API Key（本机无鉴权接口可留空）"
-            }
-          >
-            <Input.Password autoComplete="off" />
-          </Form.Item>
-          <Alert
-            type="info"
-            message="兼容 Chat Completions 的接口。密钥只在本机加密保存；本地模型可使用 localhost HTTP 地址。"
-          />
-        </Form>
-      </Modal>
-      <Modal
         title="安排 Facebook 主页发布"
         open={Boolean(publish)}
         onCancel={() => setPublish(null)}
@@ -817,25 +738,12 @@ export function PostsPage() {
 
 export function AuthorizationsPage() {
   const { data, error, run } = usePublishing();
-  const [form] = Form.useForm();
   const [manualForm] = Form.useForm();
   const [callbackForm] = Form.useForm();
-  const [saving, setSaving] = useState(false);
   const [manual, setManual] = useState(false);
   const [rule, setRule] = useState<FacebookPage | null>(null);
   const [ruleForm] = Form.useForm();
   if (!data) return <Loading error={error} />;
-  const save = async () => {
-    try {
-      const values = await form.validateFields();
-      setSaving(true);
-      await run("app.save", values);
-      form.setFieldValue("secret", "");
-    } catch {
-    } finally {
-      setSaving(false);
-    }
-  };
   const saveRule = async () => {
     try {
       const values = await ruleForm.validateFields();
@@ -848,6 +756,7 @@ export function AuthorizationsPage() {
       <PageTitle
         title="主页授权"
         detail="使用你自己的 Meta 应用连接 Facebook 主页。授权在系统浏览器中进行，令牌仅在本机加密保存。"
+        extra={<Link to="/settings/services">管理 Meta 应用配置 →</Link>}
       />
       {!data.secureStorage && (
         <Alert
@@ -857,51 +766,33 @@ export function AuthorizationsPage() {
           className="mb-4"
         />
       )}
-      <div className="publishing-grid">
-        <Card bordered={false} title="1. 配置 Meta 应用">
-          <Form form={form} layout="vertical" initialValues={data.app}>
-            <Form.Item
-              name="appId"
-              label="Meta App ID"
-              rules={[{ required: true }]}
-            >
-              <Input />
-            </Form.Item>
-            <Form.Item
-              name="secret"
-              label={
-                data.app.hasSecret
-                  ? "App Secret（已加密保存，留空保留）"
-                  : "App Secret"
-              }
-            >
-              <Input.Password autoComplete="off" />
-            </Form.Item>
-            <Form.Item
-              name="version"
-              label="Graph API 版本"
-              rules={[{ required: true }]}
-            >
-              <Input placeholder="v26.0" />
-            </Form.Item>
-            <Form.Item
-              name="redirectUri"
-              label="OAuth 回调地址"
-              rules={[{ required: true }]}
-            >
-              <Input />
-            </Form.Item>
+      <div className="authorization-layout">
+        <Card
+          bordered={false}
+          title="连接 Facebook 主页"
+          extra={
+            <Tag color={data.app.hasSecret ? "success" : "warning"}>
+              {data.app.hasSecret ? "应用已配置" : "请先配置应用"}
+            </Tag>
+          }
+        >
+          {!data.app.hasSecret && (
             <Alert
               type="info"
-              message="将回调地址原样加入 Meta 应用的 Valid OAuth Redirect URIs。HTTP localhost 是否可用取决于应用类型和开发设置；HTTPS 回调可使用下方手动返回方式。"
-              className="mb-4"
+              className="mb-5"
+              message={
+                <span>
+                  还未配置 Meta 应用，请先到{" "}
+                  <Link to="/settings/services">服务配置</Link> 填写应用信息。
+                </span>
+              }
             />
-            <Button type="primary" loading={saving} onClick={save}>
-              保存应用配置
-            </Button>
-          </Form>
-        </Card>
-        <Card bordered={false} title="2. 授权并选择主页">
+          )}
+          {data.app.hasSecret && (
+            <p className="muted">
+              当前应用：{data.app.appId} · {data.app.version}
+            </p>
+          )}
           <Space direction="vertical" size="middle" style={{ width: "100%" }}>
             <p>
               所需权限：pages_show_list、pages_read_engagement、pages_manage_posts。

@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import {
   HashRouter,
   Navigate,
-  NavLink,
   Route,
   Routes,
   useLocation,
@@ -11,7 +10,6 @@ import {
 import {
   App as AntApp,
   Alert,
-  Badge,
   Button,
   Card,
   ConfigProvider,
@@ -25,23 +23,8 @@ import {
   theme,
 } from "antd";
 import zhCN from "antd/locale/zh_CN";
-import {
-  AppstoreOutlined,
-  CheckCircleOutlined,
-  ControlOutlined,
-  ExperimentOutlined,
-  FileSearchOutlined,
-  FolderOutlined,
-  HistoryOutlined,
-  PlaySquareOutlined,
-  SettingOutlined,
-  SlidersOutlined,
-  UnorderedListOutlined,
-  VideoCameraOutlined,
-  EditOutlined,
-  SafetyOutlined,
-  SendOutlined,
-} from "@ant-design/icons";
+import { CheckCircleOutlined } from "@ant-design/icons";
+import Sidebar, { navigationEntries } from "./Sidebar";
 import { StoreProvider, useStore } from "./store";
 import { CompareModal, PageTitle, ReportModal } from "./components";
 import Process from "./pages/Process";
@@ -68,88 +51,7 @@ const PublishTasksPage = lazy(() =>
     default: module.PublishTasksPage,
   })),
 );
-
-const groups = [
-  {
-    title: "工作区",
-    entries: [
-      {
-        path: "/workspace/process",
-        label: "视频处理",
-        icon: <PlaySquareOutlined />,
-      },
-      {
-        path: "/workspace/batch",
-        label: "批量处理",
-        icon: <AppstoreOutlined />,
-      },
-      {
-        path: "/workspace/delivery",
-        label: "短剧制作",
-        icon: <VideoCameraOutlined />,
-      },
-    ],
-  },
-  {
-    title: "内容与发布",
-    entries: [
-      { path: "/publishing/posts", label: "帖子内容", icon: <EditOutlined /> },
-      {
-        path: "/publishing/pages",
-        label: "主页授权",
-        icon: <SafetyOutlined />,
-      },
-      { path: "/publishing/tasks", label: "发布任务", icon: <SendOutlined /> },
-    ],
-  },
-  {
-    title: "调优与质量",
-    entries: [
-      {
-        path: "/tools/calibrate",
-        label: "自动调参",
-        icon: <SlidersOutlined />,
-      },
-      {
-        path: "/library/reports",
-        label: "质量报告",
-        icon: <FileSearchOutlined />,
-      },
-      { path: "/tools/profiles", label: "处理配置", icon: <ControlOutlined /> },
-    ],
-  },
-  {
-    title: "素材库",
-    entries: [
-      {
-        path: "/library/history",
-        label: "历史记录",
-        icon: <HistoryOutlined />,
-      },
-      {
-        path: "/library/corpus",
-        label: "参考素材库",
-        icon: <FolderOutlined />,
-      },
-    ],
-  },
-  {
-    title: "工具",
-    entries: [
-      {
-        path: "/tools/queue",
-        label: "处理队列",
-        icon: <UnorderedListOutlined />,
-      },
-      {
-        path: "/tools/experiments",
-        label: "实验版本",
-        icon: <ExperimentOutlined />,
-      },
-      { path: "/settings", label: "设置", icon: <SettingOutlined /> },
-    ],
-  },
-];
+const PublishingSettings = lazy(() => import("./pages/PublishingSettings"));
 
 function SettingsPage() {
   const { data, settings, setSettings } = useStore();
@@ -238,8 +140,9 @@ function Workspace() {
   const location = useLocation();
   const [comparison, setComparison] = useState<Job | null>(null);
   const [report, setReport] = useState<Job | null>(null);
-  const entries = groups.flatMap((group) => group.entries);
-  const current = entries.find((entry) => entry.path === location.pathname);
+  const current = navigationEntries.find(
+    (entry) => entry.path === location.pathname,
+  );
   const active = jobs.filter((job) => !terminal(job)).length;
   const callbacks = { compare: setComparison, report: setReport };
   return (
@@ -277,44 +180,7 @@ function Workspace() {
       <div
         className={`desktop ${settings.theme} ${settings.reducedMotion ? "reduce-motion" : ""}`}
       >
-        <aside className="sidebar">
-          <div className="brand">
-            <span className="brand-symbol">
-              v<span>u</span>
-            </span>
-            <div>
-              <strong>Video Uniquifier</strong>
-              <small>本地视频工作台</small>
-            </div>
-          </div>
-          <nav aria-label="主导航">
-            {groups.map((group) => (
-              <div className="nav-group" key={group.title}>
-                <div className="nav-group-label">{group.title}</div>
-                {group.entries.map((entry) => (
-                  <NavLink
-                    key={entry.path}
-                    to={entry.path}
-                    aria-label={entry.label}
-                  >
-                    {entry.icon}
-                    <span>{entry.label}</span>
-                    {entry.path === "/tools/queue" && active > 0 && (
-                      <Badge count={active} color="#3b8c77" />
-                    )}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
-          </nav>
-          <div className="sidebar-bottom">
-            <span className={`engine-dot ${error ? "offline" : ""}`} />
-            <div>
-              <strong>{error ? "引擎连接中断" : "本地引擎就绪"}</strong>
-              <small>v{data.version} · 本地处理</small>
-            </div>
-          </div>
-        </aside>
+        <Sidebar active={active} error={error} version={data.version} />
         <div className="main-shell">
           <header className="topbar">
             <div className="breadcrumbs">
@@ -405,6 +271,10 @@ function Workspace() {
                   element={<Calibrate key="variants" variants />}
                 />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route
+                  path="/settings/services"
+                  element={<PublishingSettings />}
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
