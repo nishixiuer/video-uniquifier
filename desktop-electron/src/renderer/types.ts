@@ -39,9 +39,18 @@ export type Settings = {
   reducedMotion: boolean;
 };
 export type ElectronAPI = {
+  publishing: <T = unknown>(method: string, params?: object) => Promise<T>;
+  openPost: (taskId: string) => Promise<void>;
   call: <T = unknown>(method: string, params?: object) => Promise<T>;
   pick: (
-    kind?: "video" | "directory" | "image" | "font" | "config" | "history",
+    kind?:
+      | "video"
+      | "directory"
+      | "image"
+      | "font"
+      | "config"
+      | "history"
+      | "post-media",
     multiple?: boolean,
   ) => Promise<string[]>;
   list: (path: string, recursive?: boolean) => Promise<string[]>;

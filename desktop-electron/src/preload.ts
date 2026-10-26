@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  publishing: (method: string, params: object = {}) =>
+    ipcRenderer.invoke("publishing:call", method, params),
+  openPost: (taskId: string) => ipcRenderer.invoke("publishing:open", taskId),
   call: (method: string, params: object = {}) =>
     ipcRenderer.invoke("engine:call", method, params),
   pick: (

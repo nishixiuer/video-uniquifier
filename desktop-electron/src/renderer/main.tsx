@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   HashRouter,
@@ -19,6 +19,7 @@ import {
   Radio,
   Select,
   Space,
+  Spin,
   Switch,
   Tag,
   theme,
@@ -37,6 +38,9 @@ import {
   SlidersOutlined,
   UnorderedListOutlined,
   VideoCameraOutlined,
+  EditOutlined,
+  SafetyOutlined,
+  SendOutlined,
 } from "@ant-design/icons";
 import { StoreProvider, useStore } from "./store";
 import { CompareModal, PageTitle, ReportModal } from "./components";
@@ -48,6 +52,22 @@ import Queue from "./pages/Queue";
 import { terminal, type Job } from "./types";
 import "antd/dist/reset.css";
 import "./styles.css";
+
+const PostsPage = lazy(() =>
+  import("./pages/Publishing").then((module) => ({
+    default: module.PostsPage,
+  })),
+);
+const AuthorizationsPage = lazy(() =>
+  import("./pages/Publishing").then((module) => ({
+    default: module.AuthorizationsPage,
+  })),
+);
+const PublishTasksPage = lazy(() =>
+  import("./pages/Publishing").then((module) => ({
+    default: module.PublishTasksPage,
+  })),
+);
 
 const groups = [
   {
@@ -68,6 +88,18 @@ const groups = [
         label: "短剧制作",
         icon: <VideoCameraOutlined />,
       },
+    ],
+  },
+  {
+    title: "内容与发布",
+    entries: [
+      { path: "/publishing/posts", label: "帖子内容", icon: <EditOutlined /> },
+      {
+        path: "/publishing/pages",
+        label: "主页授权",
+        icon: <SafetyOutlined />,
+      },
+      { path: "/publishing/tasks", label: "发布任务", icon: <SendOutlined /> },
     ],
   },
   {
@@ -193,7 +225,7 @@ function SettingsPage() {
           <Alert
             showIcon
             type="info"
-            message="处理结果和质量报告均保存在本机。没有视频发布功能，也不会自动上传素材。"
+            message="处理结果和质量报告保存在本机。仅在你安排发布或启用主页自动发帖时上传素材；AI 生成会向所配置接口发送文字资料。"
           />
         </Card>
       </div>
@@ -290,7 +322,7 @@ function Workspace() {
             </div>
             <Space>
               <span className="privacy-indicator">
-                <CheckCircleOutlined /> 素材保留在本机
+                <CheckCircleOutlined /> 本地处理 · 自主发布
               </span>
               <Button
                 size="small"
@@ -313,47 +345,69 @@ function Workspace() {
                 showIcon
               />
             )}
-            <Routes>
-              <Route
-                path="/"
-                element={<Navigate to="/workspace/process" replace />}
-              />
-              <Route
-                path="/workspace/process"
-                element={
-                  <Process key={`process-${settings.method}`} {...callbacks} />
-                }
-              />
-              <Route
-                path="/workspace/delivery"
-                element={<Process key="delivery" deliveryOnly {...callbacks} />}
-              />
-              <Route
-                path="/workspace/batch"
-                element={<Batch key={settings.method} {...callbacks} />}
-              />
-              <Route
-                path="/library/history"
-                element={<History {...callbacks} />}
-              />
-              <Route
-                path="/library/reports"
-                element={<Quality report={setReport} />}
-              />
-              <Route path="/library/corpus" element={<CorpusPage />} />
-              <Route path="/tools/queue" element={<Queue {...callbacks} />} />
-              <Route path="/tools/profiles" element={<Profiles />} />
-              <Route
-                path="/tools/calibrate"
-                element={<Calibrate key="calibrate" />}
-              />
-              <Route
-                path="/tools/experiments"
-                element={<Calibrate key="variants" variants />}
-              />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <Suspense
+              fallback={
+                <Spin tip="正在载入页面">
+                  <div className="p-8" />
+                </Spin>
+              }
+            >
+              <Routes>
+                <Route
+                  path="/"
+                  element={<Navigate to="/workspace/process" replace />}
+                />
+                <Route
+                  path="/workspace/process"
+                  element={
+                    <Process
+                      key={`process-${settings.method}`}
+                      {...callbacks}
+                    />
+                  }
+                />
+                <Route
+                  path="/workspace/delivery"
+                  element={
+                    <Process key="delivery" deliveryOnly {...callbacks} />
+                  }
+                />
+                <Route
+                  path="/workspace/batch"
+                  element={<Batch key={settings.method} {...callbacks} />}
+                />
+                <Route
+                  path="/library/history"
+                  element={<History {...callbacks} />}
+                />
+                <Route
+                  path="/library/reports"
+                  element={<Quality report={setReport} />}
+                />
+                <Route path="/library/corpus" element={<CorpusPage />} />
+                <Route path="/publishing/posts" element={<PostsPage />} />
+                <Route
+                  path="/publishing/pages"
+                  element={<AuthorizationsPage />}
+                />
+                <Route
+                  path="/publishing/tasks"
+                  element={<PublishTasksPage />}
+                />
+                <Route path="/tools/queue" element={<Queue {...callbacks} />} />
+                <Route path="/tools/profiles" element={<Profiles />} />
+                <Route
+                  path="/tools/calibrate"
+                  element={<Calibrate key="calibrate" />}
+                />
+                <Route
+                  path="/tools/experiments"
+                  element={<Calibrate key="variants" variants />}
+                />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </Suspense>
           </main>
           <footer className="statusbar">
             <span>视频处理工作台</span>

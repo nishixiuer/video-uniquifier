@@ -6,6 +6,7 @@ import {
   net,
   protocol,
   shell,
+  safeStorage,
 } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
@@ -14,6 +15,7 @@ import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { PublishingService } from "./publishing/service";
 
 const repoRoot = resolve(__dirname, "../..");
 const grants = new Set<string>();
@@ -31,6 +33,7 @@ let quitting = false;
 let stopped = false;
 let engineError = "";
 let lastLogs = "";
+let publishing: PublishingService;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -183,6 +186,29 @@ async function startEngine(): Promise<void> {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(
+    "publishing:call",
+    async (_event, method: string, params: Record<string, unknown> = {}) => {
+      const result = await publishing.dispatch(method, params);
+      const snapshot = publishing.snapshot();
+      snapshot.posts.forEach((post) =>
+        post.media.forEach((media) => {
+          if (existsSync(media.path)) grant(media.path);
+        }),
+      );
+      if (method === "media.import" && Array.isArray(result))
+        result.forEach((media) => grant(media.path));
+      return result;
+    },
+  );
+  ipcMain.handle("publishing:open", (_event, taskId: string) => {
+    const task = publishing.snapshot().tasks.find((task) => task.id === taskId);
+    if (!task?.url) throw new Error("该任务还没有远端链接。");
+    const url = new URL(task.url);
+    if (url.protocol !== "https:" || url.hostname !== "www.facebook.com")
+      throw new Error("无效的帖子链接。");
+    return shell.openExternal(url.toString());
+  });
   const methods = new Set([
     "bootstrap",
     "jobs.list",
@@ -227,15 +253,17 @@ function registerIpc(): void {
     "dialog:pick",
     async (_event, kind: string, multiple: boolean = false) => {
       const extensions =
-        kind === "history"
-          ? ["json"]
-          : kind === "font"
-            ? ["ttf", "otf", "ttc"]
-            : kind === "image"
-              ? ["png", "jpg", "jpeg", "webp"]
-              : kind === "config"
-                ? ["yaml", "yml"]
-                : ["mp4", "mov", "mkv", "webm", "avi", "m4v"];
+        kind === "post-media"
+          ? ["jpg", "jpeg", "png", "mp4", "mov"]
+          : kind === "history"
+            ? ["json"]
+            : kind === "font"
+              ? ["ttf", "otf", "ttc"]
+              : kind === "image"
+                ? ["png", "jpg", "jpeg", "webp"]
+                : kind === "config"
+                  ? ["yaml", "yml"]
+                  : ["mp4", "mov", "mkv", "webm", "avi", "m4v"];
       const result = await dialog.showOpenDialog(window!, {
         properties:
           kind === "directory"
@@ -325,6 +353,26 @@ async function createWindow(): Promise<void> {
   });
 }
 app.whenReady().then(async () => {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
+  app.on("second-instance", () => {
+    window?.show();
+    window?.focus();
+  });
+  publishing = new PublishingService({
+    root: join(app.getPath("userData"), "publishing"),
+    encrypt: (value) => safeStorage.encryptString(value).toString("base64"),
+    decrypt: (value) => safeStorage.decryptString(Buffer.from(value, "base64")),
+    secure: () =>
+      safeStorage.isEncryptionAvailable() &&
+      (process.platform !== "linux" ||
+        safeStorage.getSelectedStorageBackend() !== "basic_text"),
+    allowed,
+    open: (url) => shell.openExternal(url),
+  });
+  publishing.start();
   protocol.handle("media", async (request) => {
     try {
       const url = new URL(request.url);
@@ -351,6 +399,7 @@ app.whenReady().then(async () => {
 });
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", (event) => {
+  publishing?.close();
   if (stopped || !child || quitting) return;
   event.preventDefault();
   quitting = true;
