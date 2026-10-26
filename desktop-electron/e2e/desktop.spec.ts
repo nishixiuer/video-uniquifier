@@ -143,8 +143,28 @@ test("文件预览、真实处理、对比、报告与重启恢复", async () =>
         .evaluate((element: HTMLVideoElement) => element.currentTime),
     )
     .toBeGreaterThan(0);
+  await modal.getByRole("tab", { name: "参数对比", exact: true }).click();
+  await expect(
+    modal.getByRole("cell", { name: "128 × 224", exact: true }),
+  ).toBeVisible();
+  await expect(
+    modal.getByRole("cell", { name: "1080 × 1920", exact: true }),
+  ).toBeVisible();
+  await expect(
+    modal.getByRole("cell", { name: "已变化", exact: true }).first(),
+  ).toBeVisible();
+  await modal.getByRole("tab", { name: "画面对比", exact: true }).click();
   await modal.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "质量报告", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("cell", { name: "128 × 224", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("tab", { name: "检查明细", exact: true })
+    .click();
   await expect(
     page.getByRole("dialog").getByText("检查项目", { exact: true }),
   ).toBeVisible();
@@ -176,6 +196,20 @@ test("文件预览、真实处理、对比、报告与重启恢复", async () =>
     .getByRole("button", { name: "Close", exact: true })
     .click();
   await page.getByRole("button", { name: "质量报告", exact: true }).click();
+  await expect(
+    page
+      .getByRole("dialog")
+      .getByRole("cell", { name: "128 × 224", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: "screenshots/parameters-zh.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page
+    .getByRole("dialog")
+    .getByRole("tab", { name: "检查明细", exact: true })
+    .click();
   await expect(
     page.getByRole("dialog").getByText("检查项目", { exact: true }),
   ).toBeVisible();

@@ -8,6 +8,7 @@ import {
   Slider,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
@@ -28,6 +29,7 @@ import {
 } from "./types";
 import { call, useStore } from "./store";
 import { reportRows } from "./report";
+import ParameterComparison from "./ParameterComparison";
 
 export function PageTitle({
   title,
@@ -276,12 +278,14 @@ export function CompareModal({
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
+  const [tab, setTab] = useState("playback");
   const offset = Number(job?.result?.source_offset || 0);
   useEffect(() => {
     setUrls([]);
     setPlaying(false);
     setDuration(0);
     setPosition(0);
+    setTab("playback");
     if (!job?.output) return;
     let mounted = true;
     void Promise.all([
@@ -337,84 +341,100 @@ export function CompareModal({
         </span>
       }
     >
-      <div className="compare-grid">
-        <div>
-          <div className="compare-label">
-            原始视频 <span>声音关闭</span>
+      <Tabs
+        activeKey={tab}
+        onChange={(next) => {
+          original.current?.pause();
+          output.current?.pause();
+          setPlaying(false);
+          setTab(next);
+        }}
+        items={[
+          { key: "playback", label: "画面对比" },
+          { key: "parameters", label: "参数对比" },
+        ]}
+      />
+      <div hidden={tab !== "playback"}>
+        <div className="compare-grid">
+          <div>
+            <div className="compare-label">
+              原始视频 <span>声音关闭</span>
+            </div>
+            <video
+              ref={original}
+              src={urls[0]}
+              muted
+              playsInline
+              preload="metadata"
+            />
           </div>
-          <video
-            ref={original}
-            src={urls[0]}
-            muted
-            playsInline
-            preload="metadata"
-          />
+          <div>
+            <div className="compare-label">
+              处理成片 <span>声音开启</span>
+            </div>
+            <video
+              ref={output}
+              src={urls[1]}
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                setDuration(event.currentTarget.duration);
+                seek(0);
+              }}
+              onTimeUpdate={(event) => {
+                const time = event.currentTarget.currentTime;
+                setPosition(time);
+                if (
+                  original.current &&
+                  Math.abs(original.current.currentTime - time - offset) > 0.18
+                )
+                  original.current.currentTime = time + offset;
+              }}
+              onEnded={() => {
+                original.current?.pause();
+                setPlaying(false);
+              }}
+            />
+          </div>
         </div>
-        <div>
-          <div className="compare-label">
-            处理成片 <span>声音开启</span>
-          </div>
-          <video
-            ref={output}
-            src={urls[1]}
-            playsInline
-            preload="metadata"
-            onLoadedMetadata={(event) => {
-              setDuration(event.currentTarget.duration);
+        <div className="compare-controls">
+          <Button
+            type="primary"
+            disabled={!duration}
+            aria-label={playing ? "暂停" : "同步播放"}
+            onClick={toggle}
+            icon={playing ? <PauseOutlined /> : <PlayCircleOutlined />}
+          >
+            {playing ? "暂停" : "同步播放"}
+          </Button>
+          <Slider
+            aria-label="对比视频进度"
+            min={0}
+            max={duration || 1}
+            step={0.05}
+            value={position}
+            onChange={seek}
+          />
+          <span>
+            {position.toFixed(1)} / {duration.toFixed(1)} 秒
+          </span>
+          <Button
+            onClick={() => {
+              original.current?.pause();
+              output.current?.pause();
+              setPlaying(false);
               seek(0);
             }}
-            onTimeUpdate={(event) => {
-              const time = event.currentTarget.currentTime;
-              setPosition(time);
-              if (
-                original.current &&
-                Math.abs(original.current.currentTime - time - offset) > 0.18
-              )
-                original.current.currentTime = time + offset;
-            }}
-            onEnded={() => {
-              original.current?.pause();
-              setPlaying(false);
-            }}
-          />
+          >
+            回到开头
+          </Button>
         </div>
+        <p className="muted">
+          两个视频同步播放与定位，默认播放成片声音。
+          {offset > 0 ? `原片已偏移 ${offset} 秒以匹配裁切后的画面。` : ""}
+        </p>
       </div>
-      <div className="compare-controls">
-        <Button
-          type="primary"
-          disabled={!duration}
-          aria-label={playing ? "暂停" : "同步播放"}
-          onClick={toggle}
-          icon={playing ? <PauseOutlined /> : <PlayCircleOutlined />}
-        >
-          {playing ? "暂停" : "同步播放"}
-        </Button>
-        <Slider
-          aria-label="对比视频进度"
-          min={0}
-          max={duration || 1}
-          step={0.05}
-          value={position}
-          onChange={seek}
-        />
-        <span>
-          {position.toFixed(1)} / {duration.toFixed(1)} 秒
-        </span>
-        <Button
-          onClick={() => {
-            original.current?.pause();
-            output.current?.pause();
-            setPlaying(false);
-            seek(0);
-          }}
-        >
-          回到开头
-        </Button>
-      </div>
-      <p className="muted">
-        两个视频同步播放与定位，默认播放成片声音。
-        {offset > 0 ? `原片已偏移 ${offset} 秒以匹配裁切后的画面。` : ""}
-      </p>
+      {tab === "parameters" && job && <ParameterComparison job={job} />}
     </Modal>
   );
 }
@@ -427,9 +447,11 @@ export function ReportModal({
 }) {
   const [report, setReport] = useState<Json | null>(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState("parameters");
   useEffect(() => {
     setReport(null);
     setError("");
+    setTab("parameters");
     if (!job) return;
     let active = true;
     void call<Json>("report.read", { id: job.id })
@@ -468,26 +490,42 @@ export function ReportModal({
             </div>
             <Tag>{job ? kindLabel(job.kind) : ""}</Tag>
           </div>
-          <Table
-            loading={!report}
-            pagination={{ pageSize: 12, showSizeChanger: false }}
-            size="small"
-            rowKey="key"
-            dataSource={report ? reportRows(report) : []}
-            columns={[
-              { title: "类别", dataIndex: "group", width: 150 },
-              { title: "检查项目", dataIndex: "label", width: 230 },
-              {
-                title: "结果",
-                dataIndex: "value",
-                render: (value: string) => (
-                  <Typography.Text className="report-cell">
-                    {value}
-                  </Typography.Text>
-                ),
-              },
+          <Tabs
+            activeKey={tab}
+            onChange={setTab}
+            items={[
+              { key: "parameters", label: "参数对比" },
+              { key: "checks", label: "检查明细" },
             ]}
           />
+          {tab === "parameters" ? (
+            report && job ? (
+              <ParameterComparison job={job} report={report} />
+            ) : (
+              <Table loading pagination={false} />
+            )
+          ) : (
+            <Table
+              loading={!report}
+              pagination={{ pageSize: 12, showSizeChanger: false }}
+              size="small"
+              rowKey="key"
+              dataSource={report ? reportRows(report) : []}
+              columns={[
+                { title: "类别", dataIndex: "group", width: 150 },
+                { title: "检查项目", dataIndex: "label", width: 230 },
+                {
+                  title: "结果",
+                  dataIndex: "value",
+                  render: (value: string) => (
+                    <Typography.Text className="report-cell">
+                      {value}
+                    </Typography.Text>
+                  ),
+                },
+              ]}
+            />
+          )}
         </>
       )}
     </Modal>
