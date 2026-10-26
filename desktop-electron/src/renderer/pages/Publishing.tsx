@@ -856,6 +856,9 @@ export function AuthorizationsPage() {
             <p>
               所需权限：pages_show_list、pages_read_engagement、pages_manage_posts。
             </p>
+            <Typography.Paragraph copyable={{ text: data.app.redirectUri }}>
+              当前回调：{data.app.redirectUri}
+            </Typography.Paragraph>
             <Button
               type="primary"
               disabled={!data.app.hasSecret}
@@ -865,6 +868,17 @@ export function AuthorizationsPage() {
             >
               打开 Facebook 官方授权
             </Button>
+            {data.authorization.status === "pending" && (
+              <Button
+                onClick={() => {
+                  void run("auth.cancel", {}, "已取消，可调整授权配置").catch(
+                    () => {},
+                  );
+                }}
+              >
+                取消本次授权
+              </Button>
+            )}
             <Alert
               type={
                 data.authorization.status === "completed"

@@ -16,6 +16,7 @@ import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { PublishingService } from "./publishing/service";
+import { YerdCallbackMapping } from "./publishing/callback-mapping";
 
 const repoRoot = resolve(__dirname, "../..");
 const grants = new Set<string>();
@@ -373,6 +374,8 @@ app.whenReady().then(async () => {
       (process.platform !== "linux" ||
         safeStorage.getSelectedStorageBackend() !== "basic_text"),
     allowed,
+    callbackMapping:
+      process.platform === "darwin" ? new YerdCallbackMapping() : undefined,
     engine: async <T>(method: string, params: Record<string, unknown> = {}) => {
       if (method === "probe" && typeof params.path === "string")
         grant(params.path);

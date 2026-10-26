@@ -2,10 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer } from "node:http";
+import { createServer, Server } from "node:http";
 import { PublishingService, renderTemplate, withinWindow } from "./service";
 import { SCOPES } from "./graph";
 import { defaultRule, type GenerationInput } from "../shared/publishing";
+import {
+  CALLBACK_MAPPING,
+  type CallbackMappingAdapter,
+} from "../shared/callback-mapping";
 
 let root: string;
 let service: PublishingService;
@@ -52,7 +56,7 @@ const originalReply = (url: URL) => {
     };
   throw new Error(`Unexpected test request: ${url.pathname}`);
 };
-function create(secure = true) {
+function create(secure = true, callbackMapping?: CallbackMappingAdapter) {
   return new PublishingService({
     root,
     secure: () => secure,
@@ -64,6 +68,7 @@ function create(secure = true) {
     },
     fetch: request as typeof fetch,
     now: () => now,
+    callbackMapping,
   });
 }
 async function connect() {
@@ -104,6 +109,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   service.close();
+  vi.restoreAllMocks();
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -253,6 +259,101 @@ describe("local posts, templates and AI", () => {
 });
 
 describe("official OAuth", () => {
+  it("switches mapping on/off, cancels pending auth and restores the saved callback across restart", async () => {
+    const mapping = { set: vi.fn(async () => {}) };
+    service.close();
+    service = create(true, mapping);
+    service.configureApp(app);
+    await service.authorize();
+    const previous = new URL(opened).searchParams.get("state");
+    await service.setCallbackMapping(true);
+    expect(service.snapshot().app).toMatchObject({
+      redirectUri: CALLBACK_MAPPING.redirectUri,
+      localCallback: { previousRedirectUri: app.redirectUri },
+    });
+    expect(service.snapshot().authorization.status).toBe("idle");
+    await expect(
+      service.completeAuthorization(
+        `${app.redirectUri}?state=${previous}&code=old`,
+      ),
+    ).rejects.toThrow("state");
+    expect(() => service.configureApp(app)).toThrow("先关闭");
+    service.configureApp({ ...app, redirectUri: CALLBACK_MAPPING.redirectUri });
+    expect(service.snapshot().app.localCallback).toBeDefined();
+    service.close();
+    service = create(true, mapping);
+    await service.setCallbackMapping(true);
+    await service.setCallbackMapping(false);
+    expect(service.snapshot().app.redirectUri).toBe(app.redirectUri);
+    expect(service.snapshot().app.localCallback).toBeUndefined();
+    expect(mapping.set).toHaveBeenLastCalledWith(false);
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("keeps saved configuration when Yerd fails and rejects unsupported platforms/invalid switches", async () => {
+    service.configureApp(app);
+    await expect(service.setCallbackMapping(true)).rejects.toThrow("Yerd");
+    service.close();
+    service = create(true, {
+      set: async () => {
+        throw new Error("代理冲突");
+      },
+    });
+    await expect(service.setCallbackMapping(true)).rejects.toThrow("代理冲突");
+    expect(service.snapshot().app.redirectUri).toBe(app.redirectUri);
+    expect(service.snapshot().app.localCallback).toBeUndefined();
+    await expect(
+      service.dispatch("app.mapping", { enabled: "yes" }),
+    ).rejects.toThrow("开关无效");
+    service.configureApp(app);
+  });
+  it("uses the HTTPS domain in OAuth/token exchange while receiving callbacks only on loopback", async () => {
+    const mapping = { set: vi.fn(async () => {}) };
+    service.close();
+    service = create(true, mapping);
+    service.configureApp(app);
+    await service.setCallbackMapping(true);
+    // Redirect the production listener to an ephemeral port so this test cannot collide with the real desktop.
+    const listen = Server.prototype.listen;
+    let listener!: Server;
+    const spy = vi
+      .spyOn(Server.prototype, "listen")
+      .mockImplementation(function (this: Server, ...args: any[]) {
+        listener = this;
+        expect(args[0]).toBe(47135);
+        expect(args[1]).toBe("127.0.0.1");
+        return Reflect.apply(listen, this, [0, "127.0.0.1", args[2]]);
+      } as typeof Server.prototype.listen);
+    await service.authorize();
+    spy.mockRestore();
+    const url = new URL(opened);
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      CALLBACK_MAPPING.redirectUri,
+    );
+    const port = (listener.address() as { port: number }).port;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/facebook/callback?state=${url.searchParams.get("state")}&code=mapped`,
+    );
+    expect(response.status).toBe(200);
+    expect(service.snapshot().authorization.status).toBe("completed");
+    const exchange = request.mock.calls.find(([target]) =>
+      new URL(String(target)).searchParams.has("code"),
+    )!;
+    expect(new URL(String(exchange[0])).searchParams.get("redirect_uri")).toBe(
+      CALLBACK_MAPPING.redirectUri,
+    );
+  });
+  it("cancels and invalidates an OAuth attempt so configuration can be edited immediately", async () => {
+    service.configureApp(app);
+    await service.authorize();
+    const old = new URL(opened).searchParams.get("state");
+    await service.dispatch("auth.cancel");
+    expect(service.snapshot().authorization.url).toBeUndefined();
+    service.configureApp(app);
+    await expect(
+      service.completeAuthorization(`${app.redirectUri}?state=${old}&code=old`),
+    ).rejects.toThrow("state");
+    expect(request).not.toHaveBeenCalled();
+  });
   it("handles an actual loopback callback, ignores invalid state and closes the listener", async () => {
     const probe = createServer();
     await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));

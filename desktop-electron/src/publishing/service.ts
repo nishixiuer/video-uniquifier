@@ -24,6 +24,10 @@ import type {
 import { defaultRule } from "../shared/publishing";
 import { FacebookGraph, GraphError, type Fetch } from "./graph";
 import { ProductionService, type ProductionOptions } from "./production";
+import {
+  CALLBACK_MAPPING,
+  type CallbackMappingAdapter,
+} from "../shared/callback-mapping";
 import type {
   PostSource,
   ProductionBatch,
@@ -44,6 +48,7 @@ type Options = {
   fetch?: Fetch;
   now?: () => number;
   engine?: ProductionOptions["engine"];
+  callbackMapping?: CallbackMappingAdapter;
 };
 const text = (value: unknown, max = 10000): string => {
   if (typeof value !== "string" || value.length > max)
@@ -115,6 +120,8 @@ export class PublishingService {
   private closed = false;
   private generating = false;
   private connecting = false;
+  private mappingBusy = false;
+  private authorizing = false;
   private request: Fetch;
   private now: () => number;
 
@@ -241,13 +248,18 @@ export class PublishingService {
   }
 
   configureApp(input: Record<string, unknown>) {
-    if (this.busy || this.oauth || this.connecting)
+    if (this.busy || this.oauth || this.connecting || this.mappingBusy)
       throw new Error("请等待当前授权或发布完成后再修改应用配置。");
     const appId = text(input.appId, 100);
     if (!/^\d+$/.test(appId)) throw new Error("Meta App ID 必须是数字。");
     const version = text(input.version, 20);
     if (!/^v\d+\.0$/.test(version)) throw new Error("API 版本格式应为 v26.0。");
     const uri = new URL(text(input.redirectUri, 2048));
+    if (
+      this.state.app.localCallback &&
+      uri.toString() !== CALLBACK_MAPPING.redirectUri
+    )
+      throw new Error("请先关闭本机域名映射，再修改回调地址。");
     if (
       uri.username ||
       uri.password ||
@@ -276,8 +288,56 @@ export class PublishingService {
       version,
       redirectUri: uri.toString(),
       hasSecret: Boolean(this.encrypted.appSecret),
+      ...(this.state.app.localCallback
+        ? { localCallback: this.state.app.localCallback }
+        : {}),
     };
     this.save();
+  }
+
+  cancelAuthorization() {
+    if (this.oauth?.claimed || this.authorizing)
+      throw new Error("正在启动或完成授权，请稍候。");
+    this.stopOAuth();
+    this.authorization = {
+      status: "idle",
+      message: "授权已取消，可修改配置或重新发起。",
+    };
+  }
+
+  async setCallbackMapping(enabled: boolean) {
+    if (typeof enabled !== "boolean") throw new Error("映射开关无效。");
+    if (
+      this.busy ||
+      this.connecting ||
+      this.mappingBusy ||
+      this.authorizing ||
+      this.oauth?.claimed
+    )
+      throw new Error("请等待当前授权或发布完成后再切换映射。");
+    if (!this.options.callbackMapping)
+      throw new Error(
+        "本机映射需要 macOS 上运行 Yerd；其他环境可登记自己的 HTTPS 回调地址。",
+      );
+    this.mappingBusy = true;
+    try {
+      if (this.oauth) this.cancelAuthorization();
+      await this.options.callbackMapping.set(enabled);
+      if (enabled) {
+        this.state.app.localCallback ??= {
+          previousRedirectUri: this.state.app.redirectUri,
+        };
+        this.state.app.redirectUri = CALLBACK_MAPPING.redirectUri;
+      } else {
+        if (this.state.app.localCallback)
+          this.state.app.redirectUri =
+            this.state.app.localCallback.previousRedirectUri;
+        delete this.state.app.localCallback;
+      }
+      this.save();
+    } finally {
+      this.mappingBusy = false;
+    }
   }
   configureAi(input: Record<string, unknown>) {
     const url = new URL(text(input.baseUrl, 2048));
@@ -306,90 +366,112 @@ export class PublishingService {
   }
 
   async authorize() {
-    if (this.busy || this.connecting)
+    if (this.busy || this.connecting || this.mappingBusy || this.authorizing)
       throw new Error("请等待当前发布或主页同步完成后再授权。");
-    if (!this.state.app.appId || !this.state.app.hasSecret)
-      throw new Error("请先配置 Meta 应用。");
-    if (this.oauth?.claimed) throw new Error("正在完成授权，请稍候。");
-    this.stopOAuth();
-    const state = randomBytes(32).toString("hex");
-    const config = structuredClone(this.state.app);
-    this.oauth = {
-      state,
-      expiresAt: this.now() + 10 * 60_000,
-      claimed: false,
-      config,
-      secret: this.secret("appSecret"),
-    };
-    const callback = new URL(config.redirectUri);
-    if (
-      ["localhost", "127.0.0.1"].includes(callback.hostname) &&
-      callback.protocol === "http:"
-    ) {
-      if (!callback.port) {
-        this.stopOAuth();
-        throw new Error("本机回调必须指定端口，例如 47135。");
-      }
-      this.server = createServer((req, res) => {
-        const url = new URL(req.url || "/", config.redirectUri);
-        if (req.method !== "GET" || url.pathname !== callback.pathname) {
-          res.writeHead(404).end();
-          return;
-        }
-        if (!this.validState(url.searchParams.get("state"))) {
-          res.writeHead(400).end("Invalid or expired authorization state.");
-          return;
-        }
-        void this.completeAuthorization(url.toString())
-          .then(() => {
-            res
-              .writeHead(200, {
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "no-store",
-              })
-              .end("授权完成，请返回桌面应用。");
-          })
-          .catch(() => {
-            res
-              .writeHead(400, {
-                "Content-Type": "text/plain; charset=utf-8",
-                "Cache-Control": "no-store",
-              })
-              .end("授权未完成，请返回桌面应用查看原因。");
-          });
-      });
-      try {
-        await new Promise<void>((resolve, reject) => {
-          this.server!.once("error", reject);
-          this.server!.listen(Number(callback.port), "127.0.0.1", resolve);
-        });
-      } catch {
-        this.stopOAuth();
-        throw new Error(
-          "授权回调端口被占用，请修改端口并同步更新 Meta 应用回调地址。",
-        );
-      }
-    }
-    const url = this.graph(config, this.oauth.secret).authorizationUrl(state);
-    this.authorization = {
-      status: "pending",
-      message: "请在系统浏览器中完成授权并选择主页。",
-      expiresAt: this.oauth.expiresAt,
-      url,
-    };
-    this.authTimer = setTimeout(() => {
-      this.authorization = {
-        status: "expired",
-        message: "授权已超时，请重新发起。",
-      };
-      this.stopOAuth();
-    }, 10 * 60_000);
+    this.authorizing = true;
     try {
-      await this.options.open(url);
-    } catch {
-      this.authorization.message = "无法自动打开浏览器，可复制授权链接打开。";
+      if (!this.state.app.appId || !this.state.app.hasSecret)
+        throw new Error("请先配置 Meta 应用。");
+      if (this.oauth?.claimed) throw new Error("正在完成授权，请稍候。");
+      this.stopOAuth();
+      const state = randomBytes(32).toString("hex");
+      const config = structuredClone(this.state.app);
+      this.oauth = {
+        state,
+        expiresAt: this.now() + 10 * 60_000,
+        claimed: false,
+        config,
+        secret: this.secret("appSecret"),
+      };
+      const callback = new URL(config.redirectUri);
+      const listener = config.localCallback
+        ? new URL(CALLBACK_MAPPING.upstream)
+        : callback;
+      if (config.localCallback) {
+        try {
+          if (
+            !this.options.callbackMapping ||
+            config.redirectUri !== CALLBACK_MAPPING.redirectUri
+          )
+            throw new Error("本机回调映射不可用，请先到服务配置检查映射开关。");
+          await this.options.callbackMapping.set(true);
+          if (this.closed) throw new Error("应用正在退出。");
+        } catch (error) {
+          this.stopOAuth();
+          throw error;
+        }
+      }
+      if (
+        ["localhost", "127.0.0.1"].includes(listener.hostname) &&
+        listener.protocol === "http:"
+      ) {
+        if (!listener.port) {
+          this.stopOAuth();
+          throw new Error("本机回调必须指定端口，例如 47135。");
+        }
+        this.server = createServer((req, res) => {
+          const url = new URL(req.url || "/", config.redirectUri);
+          if (req.method !== "GET" || url.pathname !== callback.pathname) {
+            res.writeHead(404).end();
+            return;
+          }
+          if (!this.validState(url.searchParams.get("state"))) {
+            res.writeHead(400).end("Invalid or expired authorization state.");
+            return;
+          }
+          void this.completeAuthorization(url.toString())
+            .then(() => {
+              res
+                .writeHead(200, {
+                  "Content-Type": "text/plain; charset=utf-8",
+                  "Cache-Control": "no-store",
+                })
+                .end("授权完成，请返回桌面应用。");
+            })
+            .catch(() => {
+              res
+                .writeHead(400, {
+                  "Content-Type": "text/plain; charset=utf-8",
+                  "Cache-Control": "no-store",
+                })
+                .end("授权未完成，请返回桌面应用查看原因。");
+            });
+        });
+        try {
+          await new Promise<void>((resolve, reject) => {
+            this.server!.once("error", reject);
+            this.server!.listen(Number(listener.port), "127.0.0.1", resolve);
+          });
+        } catch {
+          this.stopOAuth();
+          throw new Error(
+            "授权回调端口被占用，请修改端口并同步更新 Meta 应用回调地址。",
+          );
+        }
+      }
+      const url = this.graph(config, this.oauth.secret).authorizationUrl(state);
+      this.authorization = {
+        status: "pending",
+        message: "请在系统浏览器中完成授权并选择主页。",
+        expiresAt: this.oauth.expiresAt,
+        url,
+      };
+      this.authTimer = setTimeout(() => {
+        this.authorization = {
+          status: "expired",
+          message: "授权已超时，请重新发起。",
+        };
+        this.stopOAuth();
+      }, 10 * 60_000);
+      try {
+        await this.options.open(url);
+      } catch {
+        this.authorization.message = "无法自动打开浏览器，可复制授权链接打开。";
+      }
+      return this.authorization;
+    } finally {
+      this.authorizing = false;
     }
-    return this.authorization;
   }
   private validState(value: string | null) {
     return Boolean(
@@ -897,6 +979,7 @@ export class PublishingService {
       this.busy ||
       this.closed ||
       this.state.paused ||
+      this.mappingBusy ||
       this.connecting ||
       this.oauth
     )
@@ -1123,11 +1206,17 @@ export class PublishingService {
       case "app.save":
         this.configureApp(params);
         break;
+      case "app.mapping":
+        await this.setCallbackMapping(params.enabled);
+        break;
       case "ai.save":
         this.configureAi(params);
         break;
       case "auth.start":
         return this.authorize();
+      case "auth.cancel":
+        this.cancelAuthorization();
+        break;
       case "auth.complete":
         await this.completeAuthorization(params.url);
         break;

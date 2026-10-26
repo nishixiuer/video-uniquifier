@@ -70,6 +70,7 @@ export type AppConfig = {
   version: string;
   redirectUri: string;
   hasSecret: boolean;
+  localCallback?: { previousRedirectUri: string };
 };
 export type AiConfig = { baseUrl: string; model: string; hasKey: boolean };
 export type PublishingSnapshot = ProductionSnapshot & {

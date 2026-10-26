@@ -1,6 +1,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Alert, Button, Card, Form, Input, Tag } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  Input,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
+import { CALLBACK_MAPPING } from "../../shared/callback-mapping";
 import { PageTitle } from "../components";
 import { PublishingLoading, usePublishing } from "./publishing-state";
 import TemplateLibrary from "./TemplateLibrary";
@@ -9,7 +20,7 @@ export default function PublishingSettings() {
   const { data, error, run } = usePublishing();
   const [appForm] = Form.useForm();
   const [aiForm] = Form.useForm();
-  const [saving, setSaving] = useState<"app" | "ai" | null>(null);
+  const [saving, setSaving] = useState<"app" | "ai" | "mapping" | null>(null);
   if (!data) return <PublishingLoading error={error} />;
   const save = async (kind: "app" | "ai") => {
     const form = kind === "app" ? appForm : aiForm;
@@ -55,6 +66,57 @@ export default function PublishingSettings() {
           <p className="muted">
             用于官方主页授权与发帖。已有主页连接会继续使用已保存的配置。
           </p>
+          <div className="mb-5">
+            <Space wrap>
+              <Switch
+                aria-label="本机域名映射"
+                checked={Boolean(data.app.localCallback)}
+                loading={saving === "mapping"}
+                disabled={saving !== null}
+                onChange={async (enabled) => {
+                  setSaving("mapping");
+                  try {
+                    await run(
+                      "app.mapping",
+                      { enabled },
+                      enabled
+                        ? "域名映射已开启，请同步更新 Meta 回调白名单"
+                        : "域名映射已关闭，已恢复原回调地址",
+                    );
+                    appForm.setFieldValue(
+                      "redirectUri",
+                      enabled
+                        ? CALLBACK_MAPPING.redirectUri
+                        : data.app.localCallback?.previousRedirectUri ||
+                            data.app.redirectUri,
+                    );
+                  } catch {
+                    // Service errors leave the saved switch and callback address unchanged.
+                  } finally {
+                    setSaving(null);
+                  }
+                }}
+              />
+              <strong>本机域名映射</strong>
+            </Space>
+            <p className="muted">
+              使用 Yerd
+              将本机域名的授权回调转发到桌面端。只映射回调路径，关闭后恢复原回调地址。
+            </p>
+            <Typography.Paragraph
+              copyable={{ text: CALLBACK_MAPPING.redirectUri }}
+              code
+            >
+              {CALLBACK_MAPPING.redirectUri}
+            </Typography.Paragraph>
+            {data.app.localCallback && (
+              <Alert
+                type="info"
+                showIcon
+                message="请将上面的完整 HTTPS 地址加入 Meta 的有效 OAuth 跳转 URI，然后重新发起授权。"
+              />
+            )}
+          </div>
           <Form form={appForm} layout="vertical" initialValues={data.app}>
             <Form.Item
               name="appId"
@@ -85,7 +147,7 @@ export default function PublishingSettings() {
               label="OAuth 回调地址"
               rules={[{ required: true }]}
             >
-              <Input />
+              <Input readOnly={Boolean(data.app.localCallback)} />
             </Form.Item>
             <Alert
               type="info"
@@ -96,7 +158,7 @@ export default function PublishingSettings() {
               <Button
                 type="primary"
                 loading={saving === "app"}
-                disabled={saving === "ai"}
+                disabled={saving !== null && saving !== "app"}
                 onClick={() => {
                   void save("app");
                 }}
@@ -154,7 +216,7 @@ export default function PublishingSettings() {
               <Button
                 type="primary"
                 loading={saving === "ai"}
-                disabled={saving === "app"}
+                disabled={saving !== null && saving !== "ai"}
                 onClick={() => {
                   void save("ai");
                 }}
