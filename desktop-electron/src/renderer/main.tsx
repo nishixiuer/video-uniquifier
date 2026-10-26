@@ -52,6 +52,8 @@ const PublishTasksPage = lazy(() =>
   })),
 );
 const PublishingSettings = lazy(() => import("./pages/PublishingSettings"));
+const Materials = lazy(() => import("./pages/Materials"));
+const Production = lazy(() => import("./pages/Production"));
 
 function SettingsPage() {
   const { data, settings, setSettings } = useStore();
@@ -221,7 +223,7 @@ function Workspace() {
               <Routes>
                 <Route
                   path="/"
-                  element={<Navigate to="/workspace/process" replace />}
+                  element={<Navigate to="/library/materials" replace />}
                 />
                 <Route
                   path="/workspace/process"
@@ -251,7 +253,19 @@ function Workspace() {
                   element={<Quality report={setReport} />}
                 />
                 <Route path="/library/corpus" element={<CorpusPage />} />
-                <Route path="/publishing/posts" element={<PostsPage />} />
+                <Route path="/library/materials" element={<Materials />} />
+                <Route
+                  path="/workspace/production"
+                  element={<Production {...callbacks} />}
+                />
+                <Route
+                  path="/publishing/posts"
+                  element={<PostsPage {...callbacks} />}
+                />
+                <Route
+                  path="/tools/copywriter"
+                  element={<PostsPage supplemental {...callbacks} />}
+                />
                 <Route
                   path="/publishing/pages"
                   element={<AuthorizationsPage />}

@@ -9,6 +9,7 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
@@ -76,6 +77,40 @@ def test_reels_export_and_restart(engine, source, tmp_path, monkeypatch):
         assert restored.jobs[job["id"]]["output"] == result["output"]
     finally:
         restored.close()
+
+
+def test_production_request_is_idempotent_and_survives_restart(engine, source, monkeypatch):
+    monkeypatch.setattr(module, "process_video", fake_reels)
+    params = {"source": str(source), "request_key": f"{uuid4()}:1"}
+    first = engine.submit(params)
+    assert engine.submit(params)["id"] == first["id"]
+    assert wait(engine, first)["status"] == "success"
+    assert len(engine.jobs) == 1
+    with pytest.raises(ValueError, match="不能修改"):
+        engine.submit({**params, "rules": {"video": {"crf": 18}}})
+    with pytest.raises(ValueError, match="编号"):
+        engine.submit({"source": str(source), "request_key": "invalid"})
+    restored = DesktopEngine(engine.root)
+    try:
+        assert restored.submit(params)["id"] == first["id"]
+        assert len(restored.jobs) == 1
+    finally:
+        restored.close()
+
+
+def test_production_history_survives_normal_job_retention(engine):
+    production = {
+        "id": "production", "status": "success",
+        "params": {"request_key": f"{uuid4()}:1"},
+    }
+    engine.jobs[production["id"]] = production
+    for index in range(1001):
+        engine.jobs[str(index)] = {"id": str(index), "status": "success", "params": {}}
+    engine._save()
+    saved = json.loads((engine.root / "jobs.json").read_text())["jobs"]
+    assert len(saved) == 1001
+    assert saved[0] == production
+    assert not any(job["id"] == "0" for job in saved)
 
 
 @pytest.mark.parametrize(

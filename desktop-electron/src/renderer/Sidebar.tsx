@@ -26,6 +26,18 @@ const groups = [
   {
     title: "工作区",
     entries: [
+      { path: "/library/materials", label: "素材库", icon: <FolderOutlined /> },
+      {
+        path: "/workspace/production",
+        label: "批量制作",
+        icon: <VideoCameraOutlined />,
+      },
+      { path: "/publishing/posts", label: "内容库", icon: <EditOutlined /> },
+    ],
+  },
+  {
+    title: "视频工具",
+    entries: [
       {
         path: "/workspace/process",
         label: "视频处理",
@@ -44,9 +56,8 @@ const groups = [
     ],
   },
   {
-    title: "内容与发布",
+    title: "发布管理",
     entries: [
-      { path: "/publishing/posts", label: "帖子内容", icon: <EditOutlined /> },
       {
         path: "/publishing/pages",
         label: "主页授权",
@@ -72,7 +83,7 @@ const groups = [
     ],
   },
   {
-    title: "素材库",
+    title: "处理记录",
     entries: [
       {
         path: "/library/history",
@@ -99,6 +110,7 @@ const groups = [
         label: "实验版本",
         icon: <ExperimentOutlined />,
       },
+      { path: "/tools/copywriter", label: "文案工具", icon: <EditOutlined /> },
     ],
   },
 ];
@@ -124,7 +136,10 @@ function readNavigation() {
   } catch {
     /* Navigation remains usable when local storage is unavailable. */
   }
-  return { collapsed: false, closed: ["调优与质量", "素材库", "工具"] };
+  return {
+    collapsed: false,
+    closed: ["视频工具", "调优与质量", "处理记录", "工具"],
+  };
 }
 
 export default function Sidebar({

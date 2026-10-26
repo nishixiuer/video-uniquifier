@@ -70,7 +70,14 @@ class DesktopEngine:
                 self.jobs[job["id"]] = job
 
     def _save(self) -> None:
-        atomic_json(self.root / "jobs.json", {"jobs": list(self.jobs.values())[-1000:]})
+        jobs = list(self.jobs.values())
+        recent_ids = {job["id"] for job in jobs[-1000:]}
+        # Production content keeps a durable link to its comparison/report and request key.
+        retained = [
+            job for job in jobs
+            if job["id"] in recent_ids or job.get("params", {}).get("request_key")
+        ]
+        atomic_json(self.root / "jobs.json", {"jobs": retained})
 
     def _update(self, identifier: str, **changes: Any) -> None:
         with self.lock:
@@ -159,6 +166,21 @@ class DesktopEngine:
             "logs": [],
         }
         with self.lock:
+            request_key = params.get("request_key")
+            if request_key is not None:
+                if not isinstance(request_key, str) or not re.fullmatch(
+                    r"[a-f0-9-]{36}:[1-9][0-9]{0,5}", request_key
+                ):
+                    raise ValueError("制作请求编号无效。")
+                existing = next(
+                    (job for job in self.jobs.values()
+                     if job["params"].get("request_key") == request_key),
+                    None,
+                )
+                if existing:
+                    if existing["params"] != params:
+                        raise ValueError("同一制作请求不能修改视频或处理参数。")
+                    return dict(existing)
             if sum(j["status"] not in TERMINAL for j in self.jobs.values()) >= 100:
                 raise ValueError("队列已满，请等待现有任务完成。")
             self.jobs[identifier] = record

@@ -29,6 +29,7 @@ import type {
 } from "../../shared/publishing";
 import { taskLabels } from "../../shared/publishing";
 import { PageTitle, Video } from "../components";
+import type { Job } from "../types";
 import { useStore } from "../store";
 import { useDraft } from "../useDraft";
 import {
@@ -63,7 +64,15 @@ function MediaPreview({ media }: { media: Media[] }) {
   ) : null;
 }
 
-export function PostsPage() {
+export function PostsPage({
+  supplemental = false,
+  compare,
+  report,
+}: {
+  supplemental?: boolean;
+  compare: (job: Job) => void;
+  report: (job: Job) => void;
+}) {
   const { data, error, run, refresh } = usePublishing();
   const { jobs } = useStore();
   const { message } = App.useApp();
@@ -85,8 +94,9 @@ export function PostsPage() {
   >([]);
   const [filter, setFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [template, setTemplate] = useState(false);
-  const [templateForm] = Form.useForm();
+  const [sourceFilter, setSourceFilter] = useState("all");
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [publishFilter, setPublishFilter] = useState("all");
   const [publish, setPublish] = useState<Post | null>(null);
   const [publishForm] = Form.useForm();
   const [preview, setPreview] = useState<Post | null>(null);
@@ -211,20 +221,23 @@ export function PostsPage() {
   return (
     <>
       <PageTitle
-        title="帖子内容"
-        detail="从本地素材生成文案、审核内容，再安排 Facebook 主页发布。"
+        title={supplemental ? "文案工具" : "内容库"}
+        detail={
+          supplemental
+            ? "手动编写与模板文案补充工具。视频批量制作请从素材库发起。"
+            : "批量制作的成片与推广文案在这里汇总。预览审核后，由主页规则自动选稿发布。"
+        }
         extra={
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => openEditor()}
-          >
-            新建帖子
-          </Button>
+          <Space>
+            <Link to="/workspace/production">前往批量制作 →</Link>
+            <Button icon={<PlusOutlined />} onClick={() => openEditor()}>
+              新建帖子
+            </Button>
+          </Space>
         }
       />
       <Tabs
-        activeKey={activeTab}
+        activeKey={supplemental ? activeTab : "posts"}
         onChange={setActiveTab}
         items={[
           {
@@ -234,12 +247,13 @@ export function PostsPage() {
               <Card bordered={false}>
                 <div className="table-toolbar">
                   <Input
-                    placeholder="搜索标题或文案"
+                    placeholder="搜索标题、文案、来源或标签"
                     aria-label="搜索帖子"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                   <Select
+                    aria-label="审核状态筛选"
                     value={filter}
                     onChange={setFilter}
                     options={[
@@ -248,14 +262,73 @@ export function PostsPage() {
                       { value: "approved", label: "已审核" },
                     ]}
                   />
+                  <Select
+                    aria-label="来源素材筛选"
+                    value={sourceFilter}
+                    onChange={setSourceFilter}
+                    showSearch
+                    optionFilterProp="label"
+                    options={[
+                      { value: "all", label: "全部来源" },
+                      { value: "manual", label: "手动 / 文案工具" },
+                      ...data.materials.map((m) => ({
+                        value: m.id,
+                        label: m.name,
+                      })),
+                    ]}
+                  />
+                  <Select
+                    aria-label="内容标签筛选"
+                    mode="multiple"
+                    placeholder="按标签筛选"
+                    value={tagFilter}
+                    onChange={setTagFilter}
+                    options={[
+                      ...new Set(data.posts.flatMap((p) => p.tags)),
+                    ].map((tag) => ({ value: tag, label: tag }))}
+                  />
+                  <Select
+                    aria-label="发布状态筛选"
+                    value={publishFilter}
+                    onChange={setPublishFilter}
+                    options={[
+                      { value: "all", label: "全部发布状态" },
+                      { value: "unused", label: "未分配发布" },
+                      ...Object.entries(taskLabels).map(([value, label]) => ({
+                        value,
+                        label,
+                      })),
+                    ]}
+                  />
                 </div>
                 <Table
                   rowKey="id"
+                  scroll={{ x: 1050 }}
                   pagination={{ pageSize: 8 }}
                   dataSource={data.posts.filter(
                     (post) =>
                       (filter === "all" || post.review === filter) &&
-                      `${post.title} ${post.copy}`.includes(search),
+                      (sourceFilter === "all" ||
+                        (sourceFilter === "manual"
+                          ? !post.source
+                          : post.source?.materialId === sourceFilter)) &&
+                      (!tagFilter.length ||
+                        post.tags.some((tag) => tagFilter.includes(tag))) &&
+                      (publishFilter === "all" ||
+                        (publishFilter === "unused"
+                          ? !data.tasks.some(
+                              (task) =>
+                                task.postId === post.id &&
+                                task.status !== "cancelled",
+                            )
+                          : data.tasks.some(
+                              (task) =>
+                                task.postId === post.id &&
+                                task.status === publishFilter,
+                            ))) &&
+                      `${post.title} ${post.copy} ${post.source?.materialName || ""} ${post.tags.join(" ")}`.includes(
+                        search,
+                      ),
                   )}
                   columns={[
                     {
@@ -266,6 +339,12 @@ export function PostsPage() {
                           <strong>{post.title}</strong>
                           <p className="post-copy-excerpt">{post.copy}</p>
                           <Space wrap>
+                            {post.source && (
+                              <Tag>
+                                来源：{post.source.materialName} ·{" "}
+                                {post.source.start}–{post.source.end} 秒
+                              </Tag>
+                            )}
                             {post.tags.map((tag) => (
                               <Tag key={tag}>{tag}</Tag>
                             ))}
@@ -302,6 +381,16 @@ export function PostsPage() {
                               task.postId === post.id &&
                               task.status !== "cancelled",
                           ) && <Tag>已安排发布</Tag>}
+                          {post.source &&
+                            !data.materials.find(
+                              (material) =>
+                                material.id === post.source?.materialId,
+                            )?.active && <Tag color="warning">来源已停用</Tag>}
+                          {data.tasks
+                            .filter((task) => task.postId === post.id)
+                            .map((task) => (
+                              <Tag key={task.id}>{taskLabels[task.status]}</Tag>
+                            ))}
                         </>
                       ),
                       width: 140,
@@ -323,6 +412,51 @@ export function PostsPage() {
                             >
                               预览
                             </Button>
+                            {post.source && (
+                              <>
+                                <Button
+                                  size="small"
+                                  disabled={
+                                    !jobs.some(
+                                      (job) =>
+                                        job.id === post.source!.jobId &&
+                                        job.output,
+                                    )
+                                  }
+                                  onClick={() => {
+                                    const job = jobs.find(
+                                      (job) => job.id === post.source!.jobId,
+                                    );
+                                    if (job) compare(job);
+                                  }}
+                                >
+                                  视频对比
+                                </Button>
+                                <Button
+                                  size="small"
+                                  disabled={
+                                    !jobs.some(
+                                      (job) =>
+                                        job.id === post.source!.jobId &&
+                                        job.report,
+                                    )
+                                  }
+                                  onClick={() => {
+                                    const job = jobs.find(
+                                      (job) => job.id === post.source!.jobId,
+                                    );
+                                    if (job) report(job);
+                                  }}
+                                >
+                                  质量报告
+                                </Button>
+                                <Link
+                                  to={`/workspace/production?batch=${post.source.batchId}`}
+                                >
+                                  制作记录
+                                </Link>
+                              </>
+                            )}
                             <Button
                               size="small"
                               disabled={assigned}
@@ -385,7 +519,10 @@ export function PostsPage() {
                       },
                     },
                   ]}
-                  locale={{ emptyText: "从“新建帖子”开始，或使用批量生成。" }}
+                  locale={{
+                    emptyText:
+                      "从素材库发起批量制作，成功的成片与文案会自动进入这里。",
+                  }}
                 />
               </Card>
             ),
@@ -495,14 +632,9 @@ export function PostsPage() {
                         选择本地素材
                       </Button>
                       <Link to="/settings/services">管理 AI 接口 →</Link>
-                      <Button
-                        onClick={() => {
-                          setTemplate(true);
-                          templateForm.resetFields();
-                        }}
-                      >
-                        新建模板
-                      </Button>
+                      <Link to="/settings/services#templates">
+                        管理文案模板 →
+                      </Link>
                     </Space>
                     {imported(generationMedia, setGenerationMedia)}
                     <Alert
@@ -538,52 +670,7 @@ export function PostsPage() {
               </div>
             ),
           },
-          {
-            key: "templates",
-            label: "文案模板",
-            children: (
-              <Card
-                bordered={false}
-                extra={
-                  <Button
-                    onClick={() => {
-                      setTemplate(true);
-                      templateForm.resetFields();
-                    }}
-                  >
-                    新建模板
-                  </Button>
-                }
-              >
-                <List
-                  dataSource={data.templates}
-                  renderItem={(item) => (
-                    <List.Item
-                      actions={[
-                        <Button
-                          key="edit"
-                          onClick={() => {
-                            setTemplate(true);
-                            templateForm.setFieldsValue(item);
-                          }}
-                        >
-                          编辑
-                        </Button>,
-                      ]}
-                    >
-                      <List.Item.Meta
-                        title={item.name}
-                        description={
-                          <pre className="template-copy">{item.body}</pre>
-                        }
-                      />
-                    </List.Item>
-                  )}
-                />
-              </Card>
-            ),
-          },
-        ]}
+        ].filter((item) => supplemental || item.key === "posts")}
       />
       <Modal
         title={editor === "new" ? "新建帖子" : "编辑帖子"}
@@ -653,34 +740,6 @@ export function PostsPage() {
             <small className="muted">每条最多 10 张图片或 1 个视频。</small>
           </div>
         </div>
-      </Modal>
-      <Modal
-        title="文案模板"
-        open={template}
-        onCancel={() => setTemplate(false)}
-        okText="保存模板"
-        cancelText="取消"
-        onOk={async () => {
-          try {
-            await run("template.save", await templateForm.validateFields());
-            setTemplate(false);
-          } catch {}
-        }}
-      >
-        <Form form={templateForm} layout="vertical">
-          <Form.Item name="id" hidden>
-            <Input />
-          </Form.Item>
-          <Form.Item name="name" label="模板名称" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="body" label="模板正文" rules={[{ required: true }]}>
-            <Input.TextArea rows={9} />
-          </Form.Item>
-          <p className="muted">
-            变量：{"{title}、{description}、{language}、{tags}、{index}"}
-          </p>
-        </Form>
       </Modal>
       <Modal
         title="安排 Facebook 主页发布"

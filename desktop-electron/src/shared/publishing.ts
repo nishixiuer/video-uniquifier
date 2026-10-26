@@ -1,3 +1,5 @@
+import type { PostSource, ProductionSnapshot } from "./production";
+
 export type Media = {
   id: string;
   path: string;
@@ -16,6 +18,7 @@ export type Post = {
   review: "pending" | "approved";
   createdAt: number;
   updatedAt: number;
+  source?: PostSource;
 };
 export type PageRule = {
   enabled: boolean;
@@ -69,7 +72,7 @@ export type AppConfig = {
   hasSecret: boolean;
 };
 export type AiConfig = { baseUrl: string; model: string; hasKey: boolean };
-export type PublishingSnapshot = {
+export type PublishingSnapshot = ProductionSnapshot & {
   posts: Post[];
   pages: FacebookPage[];
   tasks: PublishTask[];
@@ -99,10 +102,10 @@ export type GenerationInput = {
 export const defaultRule = (): PageRule => ({
   enabled: false,
   tags: [],
-  dailyLimit: 3,
-  intervalHours: 3,
-  start: "08:00",
-  end: "22:00",
+  dailyLimit: 5,
+  intervalHours: 1,
+  start: "00:00",
+  end: "23:59",
   format: "feed",
 });
 export const taskLabels: Record<PublishTask["status"], string> = {

@@ -196,6 +196,9 @@ function registerIpc(): void {
           if (existsSync(media.path)) grant(media.path);
         }),
       );
+      snapshot.materials.forEach((material) => {
+        if (existsSync(material.video.path)) grant(material.video.path);
+      });
       if (method === "media.import" && Array.isArray(result))
         result.forEach((media) => grant(media.path));
       return result;
@@ -370,6 +373,12 @@ app.whenReady().then(async () => {
       (process.platform !== "linux" ||
         safeStorage.getSelectedStorageBackend() !== "basic_text"),
     allowed,
+    engine: async <T>(method: string, params: Record<string, unknown> = {}) => {
+      if (method === "probe" && typeof params.path === "string")
+        grant(params.path);
+      const result = await rpc(method, params);
+      return result as T;
+    },
     open: (url) => shell.openExternal(url),
   });
   publishing.start();
@@ -389,6 +398,7 @@ app.whenReady().then(async () => {
   registerIpc();
   try {
     await startEngine();
+    publishing.production.start();
   } catch (error) {
     engineError = String(error);
   }

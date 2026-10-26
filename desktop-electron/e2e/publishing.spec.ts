@@ -36,7 +36,7 @@ async function launch() {
   page = await app.firstWindow();
   page.on("pageerror", (error) => errors.push(error.message));
   await expect(
-    page.getByRole("heading", { name: "视频处理", exact: true }),
+    page.getByRole("heading", { name: "素材库", exact: true }),
   ).toBeVisible();
 }
 async function go(name: string) {
@@ -95,8 +95,8 @@ test.afterAll(async () => {
 });
 
 test("独立中文导航、手动草稿、图片预览和审核", async () => {
-  for (const name of ["帖子内容", "主页授权", "发布任务"]) await go(name);
-  await go("帖子内容");
+  for (const name of ["内容库", "主页授权", "发布任务"]) await go(name);
+  await go("内容库");
   await page.getByRole("button", { name: /新建帖子/ }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("帖子标题", { exact: true }).fill("本地图片帖子");
@@ -148,7 +148,7 @@ test("独立中文导航、手动草稿、图片预览和审核", async () => {
 });
 
 test("可配置 AI 接口通过主进程生成并保存待审核内容", async () => {
-  await go("帖子内容");
+  await go("文案工具");
   await page.getByRole("tab", { name: "批量生成", exact: true }).click();
   await page.getByLabel("产品 / 短剧名称", { exact: true }).fill("短剧测试");
   await page
@@ -165,7 +165,7 @@ test("可配置 AI 接口通过主进程生成并保存待审核内容", async (
   await expect(
     page.getByLabel("API Key（已加密保存，留空保留）", { exact: true }),
   ).toHaveValue("");
-  await page.getByRole("link", { name: "前往帖子内容 →", exact: true }).click();
+  await page.getByRole("link", { name: "前往文案工具 →", exact: true }).click();
   await expect(
     page.getByRole("tab", { name: "批量生成", exact: true }),
   ).toHaveAttribute("aria-selected", "true");
@@ -176,9 +176,14 @@ test("可配置 AI 接口通过主进程生成并保存待审核内容", async (
     page.getByLabel("产品资料 / 剧情介绍", { exact: true }),
   ).toHaveValue("仅本机模拟服务测试，禁止真实发帖。");
   await page.getByLabel("生成数量", { exact: true }).fill("2");
-  await page.getByLabel("生成方式", { exact: true }).press("ArrowDown");
-  await page.getByLabel("生成方式", { exact: true }).press("ArrowDown");
-  await page.getByLabel("生成方式", { exact: true }).press("Enter");
+  await page
+    .locator(".ant-select")
+    .filter({ has: page.getByLabel("生成方式", { exact: true }) })
+    .click();
+  await page
+    .locator(".ant-select-dropdown:visible")
+    .getByText("AI 文案（使用已配置接口）", { exact: true })
+    .click();
   await expect(
     page.locator(".ant-select-selection-item").filter({ hasText: "AI 文案" }),
   ).toBeVisible();
@@ -229,7 +234,7 @@ test("Meta 应用本机加密配置和任务暂停状态可在重启后恢复", 
     page.getByRole("button", { name: "恢复发布调度", exact: true }),
   ).toBeVisible();
   await capture("publishing-tasks");
-  await go("帖子内容");
+  await go("内容库");
   await page.getByRole("tab", { name: /内容库/ }).click();
   await expect(
     page.getByRole("row").filter({ hasText: "本地图片帖子" }),

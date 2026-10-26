@@ -38,7 +38,7 @@ async function launch() {
   );
   page = await app.firstWindow();
   await expect(
-    page.getByRole("heading", { name: "视频处理", exact: true }),
+    page.getByRole("heading", { name: "素材库", exact: true }),
   ).toBeVisible();
 }
 test.beforeAll(async () => {
@@ -69,6 +69,7 @@ test.afterAll(async () => {
 });
 
 test("中文导航和独立页面可操作", async () => {
+  await navigate(page, "视频处理");
   await expect(
     page.getByText("短剧交付 · 默认", { exact: true }),
   ).toBeVisible();
@@ -96,7 +97,7 @@ test("中文导航和独立页面可操作", async () => {
 });
 
 test("导航分组、侧栏收窄和固定设置入口支持键盘及状态恢复", async () => {
-  const workspace = page.getByRole("button", { name: "工作区", exact: true });
+  const workspace = page.getByRole("button", { name: "视频工具", exact: true });
   await workspace.click();
   await expect(workspace).toHaveAttribute("aria-expanded", "false");
   await expect(

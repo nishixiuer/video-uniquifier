@@ -23,8 +23,17 @@ import type {
 } from "../shared/publishing";
 import { defaultRule } from "../shared/publishing";
 import { FacebookGraph, GraphError, type Fetch } from "./graph";
+import { ProductionService, type ProductionOptions } from "./production";
+import type {
+  PostSource,
+  ProductionBatch,
+  ProductionInput,
+} from "../shared/production";
 
-type State = Omit<PublishingSnapshot, "authorization" | "secureStorage">;
+type State = Omit<
+  PublishingSnapshot,
+  "authorization" | "secureStorage" | "materials" | "batches"
+>;
 type Options = {
   root: string;
   encrypt: (value: string) => string;
@@ -34,6 +43,7 @@ type Options = {
   open: (url: string) => Promise<void>;
   fetch?: Fetch;
   now?: () => number;
+  engine?: ProductionOptions["engine"];
 };
 const text = (value: unknown, max = 10000): string => {
   if (typeof value !== "string" || value.length > max)
@@ -84,6 +94,7 @@ export function renderTemplate(
 }
 
 export class PublishingService {
+  readonly production: ProductionService;
   private state: State;
   private encrypted: Record<string, string>;
   private authorization: PublishingSnapshot["authorization"] = {
@@ -142,6 +153,29 @@ export class PublishingService {
       : {};
     this.request = options.fetch || fetch;
     this.now = options.now || Date.now;
+    this.production = new ProductionService({
+      root: options.root,
+      engine: options.engine,
+      importMedia: (paths) => this.importMedia(paths),
+      templates: () => this.state.templates,
+      freezeAi: (id, mode) => {
+        if (mode === "ai" && !this.state.ai.model)
+          throw new Error("请先在服务配置中设置 AI 接口和模型。");
+        if (mode === "ai" && this.encrypted.aiKey) {
+          this.encrypted[`batch-ai:${id}`] = this.encrypted.aiKey;
+          this.atomic("credentials.enc.json", this.encrypted);
+        }
+        return structuredClone(this.state.ai);
+      },
+      generateCopy: (batch, context, index, signal) =>
+        batch.mode === "ai"
+          ? this.generateAi(batch.template.body, context, index, batch, signal)
+          : Promise.resolve(
+              renderTemplate(batch.template.body, context, index),
+            ),
+      createPost: (input, source) => this.savePost(input, source),
+      now: this.now,
+    });
     for (const task of this.state.tasks) {
       if (task.status === "publishing") {
         task.status = "uncertain";
@@ -182,6 +216,7 @@ export class PublishingService {
   snapshot(): PublishingSnapshot {
     return structuredClone({
       ...this.state,
+      ...this.production.snapshot(),
       authorization: this.authorization,
       secureStorage: this.options.secure(),
     });
@@ -194,6 +229,7 @@ export class PublishingService {
   }
   close() {
     this.closed = true;
+    this.production.close();
     if (this.timer) clearInterval(this.timer);
     this.stopOAuth();
   }
@@ -471,10 +507,10 @@ export class PublishingService {
       const extension = extname(source).toLowerCase();
       const kind = [".jpg", ".jpeg", ".png"].includes(extension)
         ? "image"
-        : [".mp4", ".mov"].includes(extension)
+        : [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"].includes(extension)
           ? "video"
           : undefined;
-      if (!kind) throw new Error("发帖素材支持 JPG、PNG、MP4、MOV。");
+      if (!kind) throw new Error("素材类型不受支持。");
       const info = statSync(source);
       if (
         !info.isFile() ||
@@ -513,7 +549,7 @@ export class PublishingService {
         throw new Error("素材不存在，请重新导入。");
       const kind = [".jpg", ".jpeg", ".png"].includes(extension)
         ? "image"
-        : [".mp4", ".mov"].includes(extension)
+        : [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"].includes(extension)
           ? "video"
           : undefined;
       if (!kind || kind !== media.kind) throw new Error("素材类型无效。");
@@ -527,7 +563,11 @@ export class PublishingService {
       };
     });
   }
-  savePost(input: Record<string, any>) {
+  savePost(input: Record<string, any>, source?: PostSource) {
+    const produced =
+      source &&
+      this.state.posts.find((post) => post.source?.itemId === source.itemId);
+    if (produced) return structuredClone(produced);
     const previous = input.id
       ? this.state.posts.find((post) => post.id === input.id)
       : undefined;
@@ -568,6 +608,7 @@ export class PublishingService {
       review,
       createdAt: previous?.createdAt || this.now(),
       updatedAt: this.now(),
+      source: previous?.source || source,
     };
     if (previous) Object.assign(previous, post);
     else this.state.posts.unshift(post);
@@ -672,17 +713,21 @@ export class PublishingService {
       "title" | "description" | "language" | "tags"
     >,
     index: number,
+    batch?: ProductionBatch,
+    signal?: AbortSignal,
   ) {
-    const config = this.state.ai;
+    const config = batch?.ai || this.state.ai;
     if (!config.model) throw new Error("请先配置 AI 接口和模型。");
-    const key = this.secret("aiKey");
+    const key = this.secret(batch ? `batch-ai:${batch.id}` : "aiKey");
     try {
       const response = await this.request(
         `${config.baseUrl}/chat/completions`,
         {
           method: "POST",
           redirect: "error",
-          signal: AbortSignal.timeout(90_000),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(90_000)])
+            : AbortSignal.timeout(90_000),
           headers: {
             "Content-Type": "application/json",
             ...(key ? { Authorization: `Bearer ${key}` } : {}),
@@ -768,6 +813,8 @@ export class PublishingService {
       throw new Error("主页授权未连接，请重新授权。");
     if (!post || post.review !== "approved")
       throw new Error("只有已审核帖子可以加入发布任务。");
+    if (!this.production.sourceEnabled(post.source))
+      throw new Error("来源素材已停用，不能安排发布。");
     if (
       this.state.tasks.some(
         (task) => task.postId === postId && task.status !== "cancelled",
@@ -834,6 +881,7 @@ export class PublishingService {
         .find(
           (post) =>
             post.review === "approved" &&
+            this.production.sourceEnabled(post.source) &&
             post.tags.some((tag) => rule.tags.includes(tag)) &&
             !this.state.tasks.some(
               (task) => task.postId === post.id && task.status !== "cancelled",
@@ -869,6 +917,7 @@ export class PublishingService {
         .find(
           (t) =>
             t.status === "queued" &&
+            this.production.sourceEnabled(t.snapshot.source) &&
             t.scheduledAt <= now &&
             (t.retryAt || 0) <= now,
         );
@@ -1050,6 +1099,25 @@ export class PublishingService {
     params: Record<string, any> = {},
   ): Promise<unknown> {
     switch (method) {
+      case "materials.import":
+        return this.production.importMaterials(params.paths, params.info);
+      case "material.save":
+        this.production.updateMaterial(params);
+        break;
+      case "material.delete":
+        this.production.removeMaterial(text(params.id));
+        break;
+      case "production.preview":
+        return this.production.preview(params as ProductionInput);
+      case "production.create":
+        return this.production.createBatch(params as ProductionInput);
+      case "production.action":
+        await this.production.action(
+          text(params.id),
+          text(params.action),
+          params.itemId,
+        );
+        break;
       case "snapshot":
         return this.snapshot();
       case "app.save":

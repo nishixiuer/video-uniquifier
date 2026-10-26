@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Alert, Button, Card, Form, Input, Tag } from "antd";
 import { PageTitle } from "../components";
 import { PublishingLoading, usePublishing } from "./publishing-state";
+import TemplateLibrary from "./TemplateLibrary";
 
 export default function PublishingSettings() {
   const { data, error, run } = usePublishing();
@@ -160,11 +161,16 @@ export default function PublishingSettings() {
               >
                 保存 AI 接口
               </Button>
-              <Link to="/publishing/posts">前往帖子内容 →</Link>
+              <Link to="/workspace/production">前往批量制作 →</Link>
+              <Link to="/tools/copywriter">前往文案工具 →</Link>
             </div>
           </Form>
         </Card>
       </div>
+      <TemplateLibrary
+        templates={data.templates}
+        save={(input) => run("template.save", input, "模板已保存")}
+      />
     </>
   );
 }
